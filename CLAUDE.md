@@ -74,6 +74,11 @@ Change `BASE_URL` in `mobile/src/api/client.ts` to your machine's LAN IP when te
 4. **Phase 4 — Taste similarity:** Resolve artists to Spotify IDs, pull related artists + genre tags, expand taste set so matching fires on adjacent artists (not just exact names). The interview-worthy subsystem.
 5. **Phase 5 — Notification fan-out:** Nightly per-metro job, diff against cached events, enqueue notifications. Three hard constraints: idempotency (track `notifications_sent` to prevent double-notify), deduplication (one digest, not five pings), rate-sanity (stay under 5k/day).
 
+## Testing
+
+- **Phase 1 test plan:** `docs/PHASE-1-TEST-PLAN.md` — full end-to-end checklist for the single-user feed (auth, taste entry, event sync, feed, mobile). Read it before testing Phase 1. Key gotcha documented there: with no Ticketmaster API key the app runs in **stub mode**, where genre matching is testable but artist matching is not (the stub resolver returns no `tm_attraction_id`).
+- **Active virtualenv is `.venv/` at the repo root** (use `.venv/Scripts/python.exe`), not `backend/venv/`.
+
 ## Schema decisions (costly to change later)
 
 - **`artists` table** is keyed by `tm_attraction_id` (and later `spotify_id`). Resolving free-text names to canonical rows on entry prevents "Radiohead" vs "radiohead" duplication bugs.
