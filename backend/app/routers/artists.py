@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, delete
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -61,7 +61,10 @@ async def add_artist(
     if tm_id:
         result = await db.execute(select(Artist).where(Artist.tm_attraction_id == tm_id))
     else:
-        result = await db.execute(select(Artist).where(Artist.name == canonical_name))
+        # Case-insensitive match so "radiohead" and "Radiohead" don't duplicate
+        result = await db.execute(
+            select(Artist).where(func.lower(Artist.name) == canonical_name.lower())
+        )
     artist = result.scalar_one_or_none()
 
     if not artist:

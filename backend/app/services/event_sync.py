@@ -15,24 +15,33 @@ from app.services.ticketmaster import fetch_events_for_metro, parse_tm_event
 logger = logging.getLogger(__name__)
 
 
-async def sync_metro(metro_id: str) -> int:
-    """Fetch and upsert events for metro_id. Returns count of events processed."""
+async def sync_metro(metro_id: str, session_factory=None) -> int:
+    """Fetch and upsert events for metro_id. Returns count of events processed.
+
+    session_factory lets callers (e.g. the Celery worker) supply an engine bound
+    to the current event loop; defaults to the app-wide AsyncSessionLocal.
+    """
+    factory = session_factory or AsyncSessionLocal
     raw_events = await fetch_events_for_metro(metro_id)
     logger.info("Fetched %d events for metro %s", len(raw_events), metro_id)
 
-    async with AsyncSessionLocal() as db:
+    async with factory() as db:
         count = 0
         for raw in raw_events:
             parsed = parse_tm_event(raw, metro_id)
 
-            # Resolve or create artist row
+            # Resolve or create the artist row so events actually link to artists
             artist_id = None
             tm_att_id = parsed.pop("tm_attraction_id", None)
+            tm_att_name = parsed.pop("tm_attraction_name", None)
             if tm_att_id:
                 result = await db.execute(select(Artist).where(Artist.tm_attraction_id == tm_att_id))
                 artist = result.scalar_one_or_none()
-                if artist:
-                    artist_id = artist.id
+                if not artist:
+                    artist = Artist(tm_attraction_id=tm_att_id, name=tm_att_name or parsed["name"])
+                    db.add(artist)
+                    await db.flush()
+                artist_id = artist.id
 
             # Upsert event (keyed by tm_event_id)
             stmt = (

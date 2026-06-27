@@ -27,11 +27,11 @@ async def resolve_artist(name: str) -> tuple[str | None, str]:
         return None, name
 
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
+        resp = await _get_with_backoff(
+            client,
             f"{_BASE}/attractions.json",
             params={"keyword": name, "apikey": settings.ticketmaster_api_key, "size": 1},
         )
-        _check_rate_limit(resp)
         data = resp.json()
 
     attractions = data.get("_embedded", {}).get("attractions", [])
@@ -56,7 +56,8 @@ async def fetch_events_for_metro(metro_id: str) -> list[dict]:
     async with httpx.AsyncClient(timeout=15) as client:
         while True:
             await asyncio.sleep(_RATE_LIMIT_DELAY)
-            resp = await client.get(
+            resp = await _get_with_backoff(
+                client,
                 f"{_BASE}/events.json",
                 params={
                     "classificationName": "music",
@@ -67,7 +68,6 @@ async def fetch_events_for_metro(metro_id: str) -> list[dict]:
                     "sort": "date,asc",
                 },
             )
-            _check_rate_limit(resp)
             data = resp.json()
             batch = data.get("_embedded", {}).get("events", [])
             events.extend(batch)
@@ -80,17 +80,26 @@ async def fetch_events_for_metro(metro_id: str) -> list[dict]:
     return events
 
 
+def _parse_dt(value: str | None) -> datetime | None:
+    """Parse a Ticketmaster ISO-8601 timestamp into a tz-aware datetime."""
+    if not value:
+        return None
+    # asyncpg requires a datetime object for timestamptz columns, not a string
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 def parse_tm_event(raw: dict, metro_id: str) -> dict:
     """Normalize a raw Ticketmaster event dict into the shape our DB expects."""
     starts_at = None
     dates = raw.get("dates", {}).get("start", {})
     if dates.get("dateTime"):
-        starts_at = dates["dateTime"]
+        starts_at = _parse_dt(dates["dateTime"])
     elif dates.get("localDate"):
-        starts_at = dates["localDate"] + "T00:00:00Z"
+        starts_at = _parse_dt(dates["localDate"] + "T00:00:00Z")
 
     attractions = raw.get("_embedded", {}).get("attractions", [])
     tm_attraction_id = attractions[0]["id"] if attractions else None
+    tm_attraction_name = attractions[0].get("name") if attractions else None
 
     classifications = raw.get("classifications", [{}])
     genre = classifications[0].get("genre", {}).get("name") if classifications else None
@@ -102,6 +111,7 @@ def parse_tm_event(raw: dict, metro_id: str) -> dict:
         "tm_event_id": raw["id"],
         "name": raw["name"],
         "tm_attraction_id": tm_attraction_id,
+        "tm_attraction_name": tm_attraction_name,
         "venue_name": venue_name,
         "metro_id": metro_id,
         "starts_at": starts_at,
@@ -109,10 +119,23 @@ def parse_tm_event(raw: dict, metro_id: str) -> dict:
     }
 
 
-def _check_rate_limit(resp: httpx.Response) -> None:
-    if resp.status_code == 429:
-        raise RuntimeError("Ticketmaster rate limit hit (429)")
-    resp.raise_for_status()
+async def _get_with_backoff(
+    client: httpx.AsyncClient, url: str, params: dict, max_retries: int = 4
+) -> httpx.Response:
+    """GET that backs off on 429 instead of aborting the whole sync."""
+    delay = 1.0
+    for attempt in range(max_retries):
+        resp = await client.get(url, params=params)
+        if resp.status_code != 429:
+            resp.raise_for_status()
+            return resp
+        # Honor Retry-After when present, otherwise exponential backoff
+        retry_after = resp.headers.get("Retry-After")
+        wait = float(retry_after) if retry_after and retry_after.isdigit() else delay
+        logger.warning("Ticketmaster 429 — backing off %.1fs (attempt %d)", wait, attempt + 1)
+        await asyncio.sleep(wait)
+        delay *= 2
+    raise RuntimeError("Ticketmaster rate limit hit (429) after retries")
 
 
 def _stub_events(metro_id: str) -> list[dict]:

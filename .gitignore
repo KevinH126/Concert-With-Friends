@@ -66,4 +66,5 @@ Thumbs.db
 *.log
 logs/
 celerybeat-schedule
+celerybeat-schedule.*
 celerybeat.pid

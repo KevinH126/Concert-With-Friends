@@ -1,25 +1,18 @@
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import engine, Base
 from app.routers import admin, artists, auth, feed, genres, users
 
+# Schema is managed by Alembic migrations (`alembic upgrade head`), not create_all.
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-
-
-app = FastAPI(title="Concert With Friends", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Concert With Friends", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # tighten for production
-    allow_credentials=True,
+    # Token-based auth (Bearer header), no cookies — credentials must stay off
+    # because "*" origins + credentials is rejected by the CORS spec.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

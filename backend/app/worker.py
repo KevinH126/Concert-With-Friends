@@ -8,6 +8,8 @@ import asyncio
 
 from celery import Celery
 from celery.schedules import crontab
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
@@ -24,7 +26,21 @@ celery_app.conf.beat_schedule = {
 celery_app.conf.timezone = "UTC"
 
 
+async def _run_sync(metro_id: str) -> int:
+    # Build a fresh engine bound to *this* event loop. The module-level engine in
+    # app.database is tied to whatever loop first used it; reusing it across the
+    # per-task loops that asyncio.run() creates raises "attached to a different
+    # loop" errors. NullPool means no connections outlive the task.
+    from app.services.event_sync import sync_metro
+
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        return await sync_metro(metro_id, session_factory=factory)
+    finally:
+        await engine.dispose()
+
+
 @celery_app.task(name="app.worker.sync_metro_task")
 def sync_metro_task(metro_id: str) -> int:
-    from app.services.event_sync import sync_metro
-    return asyncio.run(sync_metro(metro_id))
+    return asyncio.run(_run_sync(metro_id))
