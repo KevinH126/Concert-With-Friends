@@ -22,21 +22,70 @@ try to support strangers. This is deliberate, not a compromise:
 
 | Layer | Choice | Why |
 |---|---|---|
-| Client | React Native (Expo) or Flutter | Expo wraps APNs + FCM behind one push API |
-| Backend | Node/TypeScript or Python/FastAPI | Either is fine; pick what you're fast in |
-| Database | **Postgres** | Domain is all relationships → join tables + FKs |
-| Job queue | BullMQ (Node) or Celery (Python) | For the notification fan-out in Phase 5 |
-| External data | Ticketmaster Discovery API (events), Spotify API (artist similarity) | Free tiers cover a personal project |
+| Client | React Native (Expo) — `mobile/` | Expo wraps APNs + FCM behind one push API |
+| Backend | Python/FastAPI — `backend/` | Async-first; fast to build |
+| Database | **PostgreSQL** (SQLAlchemy async + asyncpg) | Domain is all relationships → join tables + FKs |
+| Job queue | Celery + Redis | For the notification fan-out in Phase 5 |
+| External data | Ticketmaster Discovery API (events), Spotify API (artist similarity, Phase 4) | Free tiers cover a personal project |
 
-**Non-negotiables:**
+**Non-negotiables (architectural constraints):**
 - All matching/scoring happens **server-side**. The app is a thin view. Keeps taste
   models and friends' data off the device and keeps the authz story clean.
 - Token-based auth (JWT or a managed provider) with secure on-device token storage.
   Do not use session cookies for a mobile client.
+- **Cache Ticketmaster per-metro on a schedule**, never per-user on page load. Watch the
+  `Rate-Limit-Available` response header; back off at 429.
+- Match on **metro/city, never raw coordinates.** Location precision is set once and
+  enforced from the start.
 
 **API limits to design around:**
 - Ticketmaster free tier: **5,000 calls/day, 5 req/sec.** Cache aggressively, pull
   **per-metro on a schedule**, never per-user on page load.
+
+---
+
+## Dev commands
+
+**Start infrastructure (Postgres + Redis):**
+```
+docker-compose up -d
+```
+
+**Backend:**
+```bash
+cd backend
+python -m venv venv && source venv/Scripts/activate   # Windows
+pip install -r requirements.txt
+cp .env.example .env   # then fill in SECRET_KEY
+uvicorn app.main:app --reload                          # API at http://localhost:8000
+```
+
+**Run DB migrations:**
+```bash
+cd backend
+alembic revision --autogenerate -m "describe change"
+alembic upgrade head
+```
+
+**Celery worker + beat (event sync):**
+```bash
+cd backend
+celery -A app.worker worker --loglevel=info
+celery -A app.worker beat --loglevel=info
+```
+
+**Manually trigger an event sync** (no Celery needed):
+```
+POST /admin/sync/{metro_id}   Header: X-Admin-Token: <SECRET_KEY>
+```
+
+**Mobile:**
+```bash
+cd mobile
+npm install
+npx expo start
+```
+Change `BASE_URL` in `mobile/src/api/client.ts` to your machine's LAN IP when testing on a physical device.
 
 ---
 
@@ -240,6 +289,18 @@ pings), rate-sanity (per-metro pulls, cache hard). Use a real job queue.
 - [ ] **Build Phase 1 to be useful solo** so the app isn't empty before friends join.
 - [ ] **Match on metro, never raw coordinates.** Decide location precision before the
       social graph exists, not after.
+
+---
+
+## Testing
+
+- **Phase 1 test plan:** `docs/PHASE-1-TEST-PLAN.md` — full end-to-end checklist for the
+  single-user feed (auth, taste entry, event sync, feed, mobile). Read it before testing
+  Phase 1. Key gotcha documented there: with no Ticketmaster API key the app runs in
+  **stub mode**, where genre matching is testable but artist matching is not (the stub
+  resolver returns no `tm_attraction_id`).
+- **Active virtualenv is `.venv/` at the repo root** (use `.venv/Scripts/python.exe`),
+  not `backend/venv/`.
 
 ---
 
