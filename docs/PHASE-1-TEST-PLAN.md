@@ -33,7 +33,7 @@ Out of scope (Phase 2+): friends, friend-aware matching, Spotify taste expansion
    docker-compose up -d            # Postgres on 5432, Redis on 6379
    docker ps                       # expect concert-with-friends-db-1 and -redis-1 "Up"
    ```
-2. **Backend env:** `backend/.env` exists with a real `SECRET_KEY`. `TICKETMASTER_API_KEY` is currently **empty → stub mode** (see §2).
+2. **Backend env:** `backend/.env` exists with a real `SECRET_KEY`. As of 2026-06-30 `TICKETMASTER_API_KEY` is **populated with a real key** → live mode by default; blank it to force stub mode for the deterministic checks (see §2).
 3. **DB schema at head:**
    ```bash
    cd backend && ../.venv/Scripts/python.exe -m alembic current   # -> 6a15c3d72c6e (head)
@@ -56,6 +56,15 @@ TOKEN=""            # filled in after login; use:  -H "Authorization: Bearer $TO
 
 ## 2. CRITICAL testing consideration — stub mode vs. real API key
 
+> **⚠️ Status update (2026-06-30):** `backend/.env` now contains a **real Ticketmaster
+> API key**, so the app is **NOT in stub mode by default anymore.** A live sync hits the
+> real API, and the stub assertions below (the fixed 3 events, `STUB_*` ids, the exact
+> names/dates) will **not** appear — those tests "fail" only because the data source
+> changed, not because anything is broken. To run the deterministic stub-mode checks in
+> this section, **temporarily blank `TICKETMASTER_API_KEY=` and restart uvicorn**; restore
+> the key afterward. With the key present you can instead run **Path B** directly to verify
+> real artist matching (Test 8.3 / 9.3, exit criterion #4) — the one thing stub mode cannot do.
+
 With `TICKETMASTER_API_KEY` empty, the app runs in **stub mode**:
 - `resolve_artist()` returns `(None, <name>)` — user-added artists get **`tm_attraction_id = NULL`**.
 - `fetch_events_for_metro()` returns 3 fixed stub events regardless of metro id:
@@ -76,13 +85,13 @@ Note today's date in CLAUDE.md context is **2026-06-27**; stub events are all in
 
 ---
 
-## 3. Health & infra ⬜
+## 3. Health & infra ✅
 - **3.1** `GET /health` → `200 {"status":"ok"}`.
 - **3.2** Swagger `/docs` loads and lists auth/users/artists/genres/feed/admin routes.
 
 ---
 
-## 4. Auth ⬜
+## 4. Auth ✅
 - **4.1 Signup happy path:** `POST /auth/signup` `{email, display_name, password}` → `201` + `access_token`. Save token.
 - **4.2 Duplicate email:** repeat 4.1 same email → `409 "Email already registered"`.
 - **4.3 Invalid email format:** `email:"notanemail"` → `422` (EmailStr validation; confirms `email-validator` is installed — regression for that bug).
@@ -96,14 +105,14 @@ Note today's date in CLAUDE.md context is **2026-06-27**; stub events are all in
 
 ---
 
-## 5. Profile / metro ⬜
+## 5. Profile / metro ✅
 - **5.1** `PATCH /users/me` `{home_metro_id:"345"}` → `200`, field updated; re-`GET /auth/me` confirms.
 - **5.2** `PATCH /users/me` `{display_name:"New Name"}` → updates.
 - **5.3** `PATCH /users/me` `{location_precision:"city"}` → accepted; `{"bogus"}` → silently ignored (stays previous value — current behavior, not an error).
 
 ---
 
-## 6. Artists ⬜
+## 6. Artists ✅
 - **6.1 Add artist:** `POST /artists` `{name:"Radiohead"}` → `201`, returns `{id,name,tm_attraction_id,weight}`. In stub mode `tm_attraction_id=null`.
 - **6.2 List:** `GET /artists` → contains Radiohead with weight 1.
 - **6.3 Update weight (upsert):** `POST /artists` `{name:"Radiohead", weight:3}` → same artist, weight now 3, **no duplicate** in list.
@@ -114,7 +123,7 @@ Note today's date in CLAUDE.md context is **2026-06-27**; stub events are all in
 
 ---
 
-## 7. Genres ⬜
+## 7. Genres ✅
 - **7.1 Add:** `POST /genres` `{genre:"Rock"}` → `201`, returns list incl "Rock".
 - **7.2 Dedup:** add "Rock" again → no duplicate; list unchanged.
 - **7.3 List:** `GET /genres` → `["Rock", ...]`.
@@ -123,7 +132,7 @@ Note today's date in CLAUDE.md context is **2026-06-27**; stub events are all in
 
 ---
 
-## 8. Event sync ⬜
+## 8. Event sync ✅
 - **8.1 Trigger sync (stub):** `POST /admin/sync/345` header `X-Admin-Token: <SECRET_KEY value from backend/.env>` → `200 {"events_upserted":3}`.
 - **8.2 Admin auth:** same call with wrong/no token → `403`.
 - **8.3 Data landed:** query DB `SELECT name, genre, starts_at, artist_id FROM events;` → 3 rows; `starts_at` is a real **timestamptz** not a string (regression for the datetime bug), Radiohead/Thom rows have non-null `artist_id`, Jazz row null.
@@ -133,7 +142,7 @@ Note today's date in CLAUDE.md context is **2026-06-27**; stub events are all in
 
 ---
 
-## 9. Feed ⬜
+## 9. Feed ✅
 Set up: one test user with `home_metro_id=345`, genre "Rock" added, and a completed sync (§8).
 - **9.1 Metro gate:** new user with **no** `home_metro_id` → `GET /feed` → `400` mentioning `home_metro_id`.
 - **9.2 Genre match:** user with genre "Rock", metro 345 → feed includes **Radiohead Live** (Rock). (Stub events have no metro filter applied at fetch, but they're stored with `metro_id=345` from the sync call, so the feed's `metro_id` filter matches only if you synced metro `345`. Sync the **same** metro id the user has.)
@@ -184,3 +193,65 @@ Phase 1 is "done enough to move to Phase 2" when:
 5. All §11 regressions confirmed.
 
 Record results inline (flip ⬜→✅/❌). File issues for any ❌ before starting Phase 2.
+
+---
+
+## 13. Run log
+
+### Pass 1 — stub mode, API only (2026-06-30)
+Ran with `TICKETMASTER_API_KEY` temporarily blanked; key restored afterward. Driven via curl + psql.
+
+- **§3 Health/infra ✅**, **§4 Auth ✅**, **§5 Profile ✅**, **§6 Artists ✅**, **§7 Genres ✅**,
+  **§8 Event sync ✅** (sync=3, idempotent re-run still 3, real `timestamptz`, artists linked,
+  stub artist rows present), **§9 Feed ✅** (metro gate, genre match, no-match `[]`, ascending
+  order, upcoming-only filter, interest going→maybe single-row, invalid level 422, missing event
+  404, remove interest). **§8.6 Celery ✅** — `sync_metro_task('345')` run twice back-to-back, no
+  cross-loop error, returned 3 each time.
+- **Deviations (minor, not bugs):**
+  - §8.2: admin sync with **no** `X-Admin-Token` header returns **422** (FastAPI missing-required-header
+    validation), not 403. The wrong-token case correctly returns 403.
+  - §6.4: case-insensitive dedup correctly keeps one row, but re-adding `radiohead` with no `weight`
+    **resets weight to the default 1** (had been 3 from §6.3). Harmless; test only asserts no duplicate.
+  - §9.1: the 400 detail text says "PATCH **/auth/me** with home_metro_id" but the working endpoint
+    is **/users/me**. Cosmetic message inaccuracy.
+- **Not run in Pass 1:** §8.3 real resolution / §9.3 artist match (Path B — needs the real key + a
+  real DMA/artist), §10 mobile (needs device/Expo), §4.10 & §5.3 bogus-value DB spot-checks (optional).
+
+### Pass 2 — real mode (2026-06-30)
+Real `TICKETMASTER_API_KEY` in `backend/.env`; uvicorn restarted in live mode.
+
+- **Key valid ✅** — direct TM calls succeed; `dmaId=345` (NYC) reports 1,955 music events.
+- **🐞 BUG FOUND → ✅ FIXED — large-metro sync 500s (deep-paging cap).** `POST /admin/sync/345`
+  originally → **500**. `fetch_events_for_metro` paged with `size=200` until `totalPages`, but
+  Ticketmaster rejects any request past **offset 1000** (`size × page > 1000`) with **400**, and
+  `_get_with_backoff` re-raised non-429 errors, so the whole sync aborted and upserted **nothing**
+  (verified: 0 real events landed). Stub mode (3 events) never paged, so this was invisible until
+  now. Impacted NYC — the primary demo metro — and any market with >1000 events (`345`=1955,
+  `382`=1323, `273`=1004; `247`=371, `287`=328, `218`=437 were already safe).
+  **Fix applied** in `app/services/ticketmaster.py`: page only up to the `_MAX_RESULTS=1000`
+  cap (events are date-asc, so we keep the soonest ~1000), and the per-page fetch now catches
+  `httpx.HTTPError` so a stray HTTP error / **timeout** keeps what was already fetched instead of
+  crashing the run. **Re-verified:** `POST /admin/sync/345` → `200 {"events_upserted":1000}`,
+  idempotent across repeated runs, NYC feed returns real events (404 Rock matches for a test user),
+  small metro `287` still `328`. A transient `httpx.ReadTimeout` once surfaced on a re-run (real
+  API slowness, not a logic bug); the new `httpx.HTTPError` catch now absorbs that once any page
+  has landed.
+  **Follow-up (P4, not P1):** the 1000-cap silently drops events beyond the soonest 1000, which is
+  fine for the feed but **wrong for the nightly pipeline diff** — full coverage needs date-windowed
+  queries. File before P4:
+  ```
+  gh issue create \
+    --title "Sync: date-window large-metro pulls to beat the TM 1000-item deep-paging cap" \
+    --body "fetch_events_for_metro caps at 1000 events (TM rejects deeper paging). Fine for the P1 feed (soonest-1000), but the P4 nightly diff needs every event or it will miss alerts. Split the per-metro query into date windows (each <1000 items) and merge. Affected metros today: 345 (1955), 382 (1323), 273 (1004)."
+  ```
+  **Filed:** [#1 — Sync: date-window large-metro pulls to beat the TM 1000-item deep-paging cap](https://github.com/KevinH126/Concert-With-Friends/issues/1) (label: `enhancement`).
+- **Artist matching ✅ (Path B, exit criterion #4)** — synced the smaller `dmaId=287` (328 events,
+  upserted cleanly). Created a fresh user with metro `287` and **no genres**, added artist
+  `Josh Groban`; `resolve_artist` populated `tm_attraction_id=K8vZ9175jS0` — the **same** id the
+  synced event carries (canonical artist row deduped/reused) — and `/feed` returned exactly that
+  one event. With no genres, the only possible match path is the artist, so artist matching is
+  proven against real data.
+- **Real-world wrinkle noted:** `resolve_artist` takes `attractions[0]` with `size=1`; searching a
+  non-touring band ("Radiohead") returns a **tribute act** ("Just Radiohead") as the top hit.
+  Acceptable for now, but typeahead/disambiguation (P-later) should revisit.
+- **Still pending:** §10 mobile end-to-end (needs Expo + device/simulator on the LAN).
