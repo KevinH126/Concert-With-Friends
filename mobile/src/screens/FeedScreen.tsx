@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, RefreshControl,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { FeedEvent, getFeed, removeInterest, setInterest } from '../api/feed';
 
 export default function FeedScreen() {
@@ -26,9 +27,14 @@ export default function FeedScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    load().finally(() => setLoading(false));
-  }, [load]);
+  // Reload whenever the tab regains focus (taste/metro may have changed on another
+  // tab). The screen stays mounted in the tab navigator, so a mount-only effect would
+  // never refetch. Existing events stay visible during the refetch — no spinner flicker.
+  useFocusEffect(
+    useCallback(() => {
+      load().finally(() => setLoading(false));
+    }, [load]),
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
