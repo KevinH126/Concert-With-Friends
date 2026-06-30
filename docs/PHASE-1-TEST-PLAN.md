@@ -158,7 +158,7 @@ Set up: one test user with `home_metro_id=345`, genre "Rock" added, and a comple
 
 ---
 
-## 10. Mobile end-to-end ⬜
+## 10. Mobile end-to-end ✅
 Run against the live backend (BASE_URL = LAN IP). Use Expo Go or a simulator.
 - **10.1 Signup** from Login screen → lands in tabbed app (Feed/Taste/Profile).
 - **10.2 Persisted session:** kill & reopen app → still logged in (token in AsyncStorage).
@@ -254,4 +254,28 @@ Real `TICKETMASTER_API_KEY` in `backend/.env`; uvicorn restarted in live mode.
 - **Real-world wrinkle noted:** `resolve_artist` takes `attractions[0]` with `size=1`; searching a
   non-touring band ("Radiohead") returns a **tribute act** ("Just Radiohead") as the top hit.
   Acceptable for now, but typeahead/disambiguation (P-later) should revisit.
-- **Still pending:** §10 mobile end-to-end (needs Expo + device/simulator on the LAN).
+- **§10 mobile:** see Pass 3 below.
+
+### Pass 3 — mobile end-to-end (2026-06-30)
+Real iOS device (Expo Go, `192.168.1.62`) against the backend bound to `0.0.0.0:8000`
+(reachable at `192.168.1.85:8000`; firewall was *not* a problem). Every step confirmed
+server-side from the uvicorn access log as the tester tapped.
+
+- **All §10 steps pass:** 10.1 signup (201 + auto `auth/me`), 10.2 persisted session
+  (reopen → `auth/me` 200, no re-login), 10.3 taste CRUD (POST/DELETE artists+genres),
+  10.4 metro persists (PATCH 200; `home_metro_id=345` survives reload — stale-field fix holds),
+  10.5 **both** empty states (the `GET /feed` 400 metro-gate → "Set your home metro", then 200
+  empty → "No upcoming shows match your taste"), 10.6 populated feed (real NYC events render),
+  10.7 interest going/clear/maybe + pull-to-refresh, 10.8 401→logout (rotated `SECRET_KEY`,
+  restarted, restored), 10.9 explicit sign-out stays signed out on reopen.
+- **🐞 BUG FOUND → ✅ FIXED — Feed didn't refresh on tab focus.** Changing taste on the Taste
+  tab and returning to Feed showed stale results; only a full app restart updated it. Cause:
+  `FeedScreen` loaded in a mount-only `useEffect`, but the tab navigator keeps the screen
+  mounted, so it never refetched. **Fix:** `mobile/src/screens/FeedScreen.tsx` now reloads via
+  `useFocusEffect` (existing list stays visible during refetch — no spinner flicker). Verified
+  live on device: removing/adding a genre updates the feed immediately, no restart.
+- **⚠️ Known gap (not a bug) — free-text genres exact-match against TM strings.** Typing
+  `Hip Hop` returns nothing because Ticketmaster stores the genre as **`Hip-Hop/Rap`**; `Rock`,
+  `Jazz`, `Pop` etc. work because they match exactly. This is the free-text genre box vs. the
+  build plan's locked **"genre picker from TM taxonomy"** decision. Tracked in
+  [#2](https://github.com/KevinH126/Concert-With-Friends/issues/2) (label: `enhancement`).
