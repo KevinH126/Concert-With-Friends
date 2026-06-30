@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 
 _BASE = "https://app.ticketmaster.com/discovery/v2"
 _RATE_LIMIT_DELAY = 0.2  # 5 req/sec safe floor
+_PAGE_SIZE = 200
+# Ticketmaster rejects deep pagination past this offset (size * page) with HTTP 400.
+# We stop here; events are sorted date-asc so we keep the soonest shows. Full coverage
+# of a >1000-event metro needs date-windowed queries — tracked for the P4 pipeline.
+_MAX_RESULTS = 1000
 
 
 async def resolve_artist(name: str) -> tuple[str | None, str]:
@@ -51,23 +56,36 @@ async def fetch_events_for_metro(metro_id: str) -> list[dict]:
         logger.warning("No Ticketmaster API key — returning stub events for metro '%s'", metro_id)
         return _stub_events(metro_id)
 
-    events = []
+    events: list[dict] = []
     page = 0
+    hit_cap = False
     async with httpx.AsyncClient(timeout=15) as client:
         while True:
             await asyncio.sleep(_RATE_LIMIT_DELAY)
-            resp = await _get_with_backoff(
-                client,
-                f"{_BASE}/events.json",
-                params={
-                    "classificationName": "music",
-                    "dmaId": metro_id,
-                    "apikey": settings.ticketmaster_api_key,
-                    "size": 200,
-                    "page": page,
-                    "sort": "date,asc",
-                },
-            )
+            try:
+                resp = await _get_with_backoff(
+                    client,
+                    f"{_BASE}/events.json",
+                    params={
+                        "classificationName": "music",
+                        "dmaId": metro_id,
+                        "apikey": settings.ticketmaster_api_key,
+                        "size": _PAGE_SIZE,
+                        "page": page,
+                        "sort": "date,asc",
+                    },
+                )
+            except httpx.HTTPError as exc:
+                # A bad/slow page (HTTP error, timeout, transport drop) shouldn't throw
+                # away everything already fetched. If we have nothing yet, surface it.
+                if events:
+                    logger.warning(
+                        "Ticketmaster request failed mid-sync for metro '%s' (%s); keeping "
+                        "%d events fetched so far",
+                        metro_id, type(exc).__name__, len(events),
+                    )
+                    break
+                raise
             data = resp.json()
             batch = data.get("_embedded", {}).get("events", [])
             events.extend(batch)
@@ -76,7 +94,16 @@ async def fetch_events_for_metro(metro_id: str) -> list[dict]:
             if page + 1 >= page_info.get("totalPages", 1):
                 break
             page += 1
+            if page * _PAGE_SIZE >= _MAX_RESULTS:
+                hit_cap = True
+                break
 
+    if hit_cap:
+        logger.warning(
+            "Metro '%s' exceeds the Ticketmaster deep-paging cap (%d events); stored the "
+            "soonest %d. Full coverage needs date-windowed queries (P4).",
+            metro_id, _MAX_RESULTS, len(events),
+        )
     return events
 
 
