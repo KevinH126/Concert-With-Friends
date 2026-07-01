@@ -11,7 +11,7 @@ worker/beat are **not** deployed yet — they arrive with the pipeline in P4.
 | Platform | Render (Docker runtime) |
 | Postgres | Paid **Basic** (persistent + daily backups; free tier is deleted ~90 days in) |
 | Web service | **Free now → paid `starter` before going public** (free only sleeps; non-destructive) |
-| Migrations | `alembic upgrade head` as `preDeployCommand` (paid only — see below) |
+| Migrations | manual from laptop on free tier; `preDeployCommand` (added on paid upgrade) |
 | Admin auth | Separate `ADMIN_TOKEN` secret, distinct from `SECRET_KEY` |
 | Data seeding | Manual `POST /admin/sync/{metro_id}` post-deploy |
 | Secrets | `render.yaml` `generateValue` (SECRET_KEY, ADMIN_TOKEN) + `fromDatabase` (DATABASE_URL) + dashboard (TICKETMASTER_API_KEY) |
@@ -30,10 +30,11 @@ worker/beat are **not** deployed yet — they arrive with the pipeline in P4.
 
 ## Migrations
 
-`preDeployCommand` runs `alembic upgrade head` automatically on every deploy —
-**but only on paid instance types.** While the web service is on the **free**
-tier, run the initial migration from your laptop against the DB's *external*
-connection string (Render dashboard → `cwf-db` → "External Database URL"):
+`preDeployCommand` (auto `alembic upgrade head` on every deploy) is **rejected by
+Render on free-tier services**, so it's omitted from `render.yaml` for now. While
+the web service is on the **free** tier, run migrations from your laptop against
+the DB's *external* connection string (Render dashboard → `cwf-db` → "External
+Database URL"):
 
 ```bash
 cd backend
@@ -55,7 +56,9 @@ curl -X POST "https://<your-service>.onrender.com/admin/sync/{metro_id}" \
 
 ## Go-public checklist
 
-- [ ] Flip `cwf-api` `plan: free` → `plan: starter` (no cold starts).
+- [ ] Flip `cwf-api` `plan: free` → a paid plan (e.g. `standard`) — no cold starts.
+- [ ] Add `preDeployCommand: alembic upgrade head` back to `cwf-api` (allowed once paid)
+      so migrations auto-run on deploy.
 - [ ] Confirm `mobile/src/api/client.ts` points at the real Render URL.
 - [ ] Seed at least one demo metro's events.
 - [ ] Verify `GET /health` and the feed against a fresh account.

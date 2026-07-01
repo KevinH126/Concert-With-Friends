@@ -9,7 +9,8 @@ databases:
     databaseName: concert_friends
     user: concert_friends
     # Paid, persistent, daily backups. Free Postgres is DELETED ~90 days in.
-    plan: basic_256mb
+    # Slug is hyphenated; legacy names (starter/standard) can't be used for new DBs.
+    plan: basic-256mb
     region: oregon # <-- change to the region nearest you
 
 services:
@@ -20,12 +21,13 @@ services:
     dockerContext: ./backend
     region: oregon # <-- keep same region as the database
     # Free web tier spins down when idle (cold start ~30-50s). Flip to a paid
-    # plan (e.g. `starter`) BEFORE sharing the link publicly. Note: preDeployCommand
-    # below only runs on paid instances — on free, run migrations manually from
-    # your laptop against the DB's external URL (see docs/DEPLOY.md).
+    # plan (e.g. `standard`) BEFORE sharing the link publicly.
     plan: free
     healthCheckPath: /health
-    preDeployCommand: alembic upgrade head
+    # preDeployCommand (auto-migrate) is NOT allowed on free-tier services, so it's
+    # omitted here. Until the web service is on a paid plan, run migrations manually
+    # from your laptop against the DB's external URL (see docs/DEPLOY.md). When you
+    # upgrade, add:  preDeployCommand: alembic upgrade head
     autoDeploy: true # deploy on push to main
     envVars:
       - key: DATABASE_URL
