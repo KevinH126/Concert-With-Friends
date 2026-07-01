@@ -206,10 +206,13 @@ to prod. Don't stack deployment (hard) on top of the pipeline (hardest) at the e
       `docs/PHASE-2-TEST-PLAN.md` manual mobile checklist.
 - **Done when:** two real accounts become friends and see each other's permitted taste +
   interest — and the authz suite is green.
-- **Honest status (2026-07-01):** backend + mobile **built**; 52-test suite (incl. the
-  full authz matrix) **green**; local migration applied. Remaining: run
-  `docs/PHASE-2-TEST-PLAN.md` on two devices, migrate prod, deploy. Known gap: unblock
-  has no mobile UI (API only).
+- **Honest status: ✅ DONE (2026-07-01).** Deployed to prod (migration + auto-deploy);
+  52-test suite green; full `PHASE-2-TEST-PLAN.md` walked on prod with live accounts —
+  invite landing/instant-accept/idempotent re-redeem, request→accept via search,
+  friend profile authz, shared-vs-private interest in both directions, block (incl.
+  block-beats-invite, scoped to the pair). Known gaps (small, non-blocking): unblock
+  and invite-revoke have no mobile UI (API only). Test accounts left on prod:
+  test_buddy / invite_pal (@example.com emails).
 
 ### P3 — Matching *(+ compose-sheet chat hand-off)*
 - [ ] Score = weighted sum of: direct artist match (weighted by the favorite/liked tier;
