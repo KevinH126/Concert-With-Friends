@@ -130,11 +130,12 @@ on its own.
 
 ```
 P1    Solo feed                              ✅ done (sync is MANUAL, not scheduled yet)
-P1.5  Deploy the backend                     ← immediate next
-P2    Social graph + interest-marking
-P3    Matching  (+ compose-sheet chat hand-off)
+P1.5  Deploy the backend                     ✅ done (live on Render)
+P2    Social graph + interest-marking        ✅ done (verified on prod)
+P3    Matching  (+ compose-sheet chat hand-off)   ← next
+P3.5  UI pass                                (after P3 reshapes the feed card; before P4)
 P4    Notification pipeline                   ★ CENTERPIECE 1
-P5    Push delivery
+P5    Push delivery  (+ onboard the real friend group)
 P6    Taste-set expansion (Spotify)
 P7    In-app chat                             ★ CENTERPIECE 2
 P8+   Backlog
@@ -229,6 +230,22 @@ to prod. Don't stack deployment (hard) on top of the pipeline (hardest) at the e
       seam — in **P7** the button points *inward* to in-app chat instead of outward.
 - **Done when:** the app tells you *who* to go with, not just *what's* playing.
 
+### P3.5 — UI pass *(added 2026-07-01)*
+Deliberately scheduled **after P3** (matching reshapes the feed card — the app's
+centerpiece screen — so polishing it earlier is rework) and **before P4** (the pipeline
+is ~pure backend, so this delays nothing, and demos look good during the P4 grind).
+Must land before real friends onboard at P5 — first impressions happen then.
+- [ ] Extract `theme.ts` (colors/spacing/radii) + shared components (`Button`, `Card`,
+      `Chip`) — **start using these from the first P3 screen onward**; the pass then
+      becomes a re-skin, not a rewrite.
+- [ ] Visual identity: pick the look from a reference folder (collect screenshots
+      during P3 — Songkick / Bandsintown / Dice event cards are the comps).
+- [ ] Feed card redesign around the P3 headline ("Sam and Alex would probably go").
+- [ ] Navigation polish, empty states, loading states (skeletons over spinners).
+- [ ] Sweep the hardcoded `#6200EE`s (~8 files) into the theme.
+- **Scope guard:** this is a re-skin + consistency pass, not a redesign of flows. UX
+  good enough not to embarrass the backend — the backend stays the differentiator.
+
 ### P4 — Notification pipeline ★ CENTERPIECE 1
 Scheduled background job (Celery beat), not request-driven. This is the resume sentence.
 - [ ] Nightly per-metro: pull → **diff** new events against the `events` cache (clean
@@ -310,7 +327,7 @@ Replaces the P3 compose-sheet hand-off button with a real system.
 |---|---|
 | **Goal** | Live, deployed, impressive backend portfolio piece. Two finished centerpieces. |
 | **Centerpieces** | (1) Notification pipeline, (2) in-app chat. Pipeline first. |
-| **Build order** | Deploy now → P2 → P3 → pipeline → push → Spotify → chat. |
+| **Build order** | Deploy now → P2 → P3 → **P3.5 UI pass** → pipeline → push (+ onboard friends) → Spotify → chat. |
 | **Artist entry** | TM-first typeahead search, debounced + min-length, **write-through cached** into the local `artists` table. Spotify search not used (lossy mapping would feed *events* = hard fail). |
 | **Genre entry** | Picker from TM taxonomy; pick at genre **or** sub-genre; **sub-genre match scores higher**; match hierarchically (a user's "Rock" matches rock sub-genres). |
 | **Favorite vs liked** | The `user_artists.weight` tier. Triple duty: **travel scope + sync scope + match weight.** |
