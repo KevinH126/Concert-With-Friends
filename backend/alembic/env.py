@@ -1,9 +1,6 @@
-import asyncio
-import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
@@ -12,13 +9,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Pull DATABASE_URL from env so alembic.ini doesn't need editing
-from dotenv import load_dotenv
-load_dotenv()
-db_url = os.getenv("DATABASE_URL", "")
-# Alembic needs psycopg2 (sync) for migrations, not asyncpg
-sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-config.set_main_option("sqlalchemy.url", sync_url)
+# Alembic needs a sync driver (psycopg2), not asyncpg. settings.sync_database_url
+# normalizes whatever form the env provides (Render hands out `postgresql://...`).
+from app.config import settings  # noqa: E402
+config.set_main_option("sqlalchemy.url", settings.sync_database_url)
 
 from app.models import Base  # noqa: E402
 target_metadata = Base.metadata

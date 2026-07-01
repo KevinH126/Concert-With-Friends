@@ -11,7 +11,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 def _require_admin(x_admin_token: str = Header(...)):
-    if not settings.secret_key or x_admin_token != settings.secret_key:
+    if not settings.admin_token or x_admin_token != settings.admin_token:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 

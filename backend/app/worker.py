@@ -33,7 +33,7 @@ async def _run_sync(metro_id: str) -> int:
     # loop" errors. NullPool means no connections outlive the task.
     from app.services.event_sync import sync_metro
 
-    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    engine = create_async_engine(settings.async_database_url, poolclass=NullPool)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         return await sync_metro(metro_id, session_factory=factory)

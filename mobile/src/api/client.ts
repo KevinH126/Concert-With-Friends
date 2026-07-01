@@ -1,8 +1,11 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Change this to your machine's local IP when testing on a physical device
-const BASE_URL = 'http://192.168.1.85:8000';
+// Defaults to the deployed backend so demos work out of the box. For local
+// backend work, set EXPO_PUBLIC_API_URL to your machine's LAN IP, e.g.
+//   EXPO_PUBLIC_API_URL=http://192.168.1.85:8000
+// Update the fallback to your real Render URL after the first deploy.
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://cwf-api.onrender.com';
 
 export const api = axios.create({ baseURL: BASE_URL });
 
