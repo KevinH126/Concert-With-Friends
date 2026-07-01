@@ -1,5 +1,11 @@
 import { api } from './client';
 
+export interface FriendGoing {
+  user_id: string;
+  display_name: string;
+  level: 'going' | 'maybe';
+}
+
 export interface FeedEvent {
   id: string;
   name: string;
@@ -8,6 +14,8 @@ export interface FeedEvent {
   starts_at: string | null;
   genre: string | null;
   my_interest: 'going' | 'maybe' | null;
+  my_interest_visibility: 'shared' | 'private' | null;
+  friends_going: FriendGoing[];
 }
 
 export async function getFeed(): Promise<FeedEvent[]> {
@@ -15,8 +23,12 @@ export async function getFeed(): Promise<FeedEvent[]> {
   return data;
 }
 
-export async function setInterest(eventId: string, level: 'going' | 'maybe'): Promise<void> {
-  await api.put(`/feed/events/${eventId}/interest`, { level });
+export async function setInterest(
+  eventId: string,
+  level: 'going' | 'maybe',
+  visibility: 'shared' | 'private' = 'shared',
+): Promise<void> {
+  await api.put(`/feed/events/${eventId}/interest`, { level, visibility });
 }
 
 export async function removeInterest(eventId: string): Promise<void> {

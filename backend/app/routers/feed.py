@@ -9,8 +9,15 @@ from sqlalchemy.orm import selectinload
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import Artist, Event, EventInterest, User, UserArtist, UserGenre
+from app.services import social
 
 router = APIRouter(prefix="/feed", tags=["feed"])
+
+
+class FriendGoing(BaseModel):
+    user_id: str
+    display_name: str
+    level: str  # 'going' | 'maybe'
 
 
 class EventResponse(BaseModel):
@@ -21,6 +28,8 @@ class EventResponse(BaseModel):
     starts_at: datetime | None
     genre: str | None
     my_interest: str | None  # 'going' | 'maybe' | None
+    my_interest_visibility: str | None  # 'shared' | 'private' | None
+    friends_going: list[FriendGoing] = []
 
     class Config:
         from_attributes = True
@@ -77,7 +86,25 @@ async def get_feed(
             EventInterest.event_id.in_(event_ids),
         )
     )
-    interests = {i.event_id: i.level for i in interest_rows.scalars().all()}
+    interests = {i.event_id: i for i in interest_rows.scalars().all()}
+
+    # Friends-going strip: friends' SHARED interest only — private never leaves its owner.
+    friends_going: dict[str, list[FriendGoing]] = {}
+    friend_id_list = await social.friend_ids(db, current_user.id)
+    if friend_id_list and event_ids:
+        rows = await db.execute(
+            select(EventInterest, User)
+            .join(User, User.id == EventInterest.user_id)
+            .where(
+                EventInterest.event_id.in_(event_ids),
+                EventInterest.user_id.in_(friend_id_list),
+                EventInterest.visibility == "shared",
+            )
+        )
+        for interest, user in rows.all():
+            friends_going.setdefault(interest.event_id, []).append(
+                FriendGoing(user_id=user.id, display_name=user.display_name, level=interest.level)
+            )
 
     return [
         EventResponse(
@@ -87,7 +114,9 @@ async def get_feed(
             venue_name=e.venue_name,
             starts_at=e.starts_at,
             genre=e.genre,
-            my_interest=interests.get(e.id),
+            my_interest=interests[e.id].level if e.id in interests else None,
+            my_interest_visibility=interests[e.id].visibility if e.id in interests else None,
+            friends_going=friends_going.get(e.id, []),
         )
         for e in events
     ]
@@ -95,6 +124,8 @@ async def get_feed(
 
 class SetInterestRequest(BaseModel):
     level: str  # 'going' | 'maybe'
+    # 'private' feeds your own feed/notifications but is invisible to friends.
+    visibility: str = "shared"  # 'shared' | 'private'
 
 
 @router.put("/events/{event_id}/interest", response_model=dict)
@@ -106,6 +137,8 @@ async def set_interest(
 ):
     if body.level not in ("going", "maybe"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="level must be 'going' or 'maybe'")
+    if body.visibility not in ("shared", "private"):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="visibility must be 'shared' or 'private'")
 
     event = await db.get(Event, event_id)
     if not event:
@@ -120,11 +153,17 @@ async def set_interest(
     interest = result.scalar_one_or_none()
     if interest:
         interest.level = body.level
+        interest.visibility = body.visibility
     else:
-        db.add(EventInterest(user_id=current_user.id, event_id=event_id, level=body.level))
+        db.add(EventInterest(
+            user_id=current_user.id,
+            event_id=event_id,
+            level=body.level,
+            visibility=body.visibility,
+        ))
 
     await db.commit()
-    return {"event_id": event_id, "level": body.level}
+    return {"event_id": event_id, "level": body.level, "visibility": body.visibility}
 
 
 @router.delete("/events/{event_id}/interest", status_code=status.HTTP_204_NO_CONTENT)

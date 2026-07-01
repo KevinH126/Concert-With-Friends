@@ -4,7 +4,21 @@ import {
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { FeedEvent, getFeed, removeInterest, setInterest } from '../api/feed';
+import { FeedEvent, FriendGoing, getFeed, removeInterest, setInterest } from '../api/feed';
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+function friendsGoingText(fg: FriendGoing[]): string {
+  const going = fg.filter((f) => f.level === 'going').map((f) => f.display_name);
+  const maybe = fg.filter((f) => f.level === 'maybe').map((f) => f.display_name);
+  const parts: string[] = [];
+  if (going.length) parts.push(`${joinNames(going)} ${going.length > 1 ? 'are' : 'is'} going`);
+  if (maybe.length) parts.push(`${joinNames(maybe)} might go`);
+  return `👥 ${parts.join(' · ')}`;
+}
 
 export default function FeedScreen() {
   const [events, setEvents] = useState<FeedEvent[]>([]);
@@ -42,14 +56,22 @@ export default function FeedScreen() {
     setRefreshing(false);
   };
 
-  const toggleInterest = async (event: FeedEvent, level: 'going' | 'maybe') => {
+  // Tap = shared interest; long-press = private (feeds your own feed/notifications
+  // but is hidden from friends). Tapping the same active level clears it.
+  const toggleInterest = async (
+    event: FeedEvent,
+    level: 'going' | 'maybe',
+    visibility: 'shared' | 'private' = 'shared',
+  ) => {
     try {
-      if (event.my_interest === level) {
+      if (event.my_interest === level && event.my_interest_visibility === visibility) {
         await removeInterest(event.id);
-        setEvents((prev) => prev.map((e) => e.id === event.id ? { ...e, my_interest: null } : e));
+        setEvents((prev) => prev.map((e) =>
+          e.id === event.id ? { ...e, my_interest: null, my_interest_visibility: null } : e));
       } else {
-        await setInterest(event.id, level);
-        setEvents((prev) => prev.map((e) => e.id === event.id ? { ...e, my_interest: level } : e));
+        await setInterest(event.id, level, visibility);
+        setEvents((prev) => prev.map((e) =>
+          e.id === event.id ? { ...e, my_interest: level, my_interest_visibility: visibility } : e));
       }
     } catch {
       Alert.alert('Error', 'Could not update interest');
@@ -93,20 +115,30 @@ export default function FeedScreen() {
             <Text style={styles.date}>{new Date(item.starts_at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</Text>
           )}
           {item.genre && <Text style={styles.genre}>{item.genre}</Text>}
+          {item.friends_going.length > 0 && (
+            <Text style={styles.friendsStrip}>{friendsGoingText(item.friends_going)}</Text>
+          )}
           <View style={styles.actions}>
             <TouchableOpacity
               style={[styles.interestBtn, item.my_interest === 'going' && styles.activeGoing]}
               onPress={() => toggleInterest(item, 'going')}
+              onLongPress={() => toggleInterest(item, 'going', 'private')}
             >
-              <Text style={[styles.interestText, item.my_interest === 'going' && styles.activeText]}>Going</Text>
+              <Text style={[styles.interestText, item.my_interest === 'going' && styles.activeText]}>
+                Going{item.my_interest === 'going' && item.my_interest_visibility === 'private' ? ' 🔒' : ''}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.interestBtn, item.my_interest === 'maybe' && styles.activeMaybe]}
               onPress={() => toggleInterest(item, 'maybe')}
+              onLongPress={() => toggleInterest(item, 'maybe', 'private')}
             >
-              <Text style={[styles.interestText, item.my_interest === 'maybe' && styles.activeText]}>Maybe</Text>
+              <Text style={[styles.interestText, item.my_interest === 'maybe' && styles.activeText]}>
+                Maybe{item.my_interest === 'maybe' && item.my_interest_visibility === 'private' ? ' 🔒' : ''}
+              </Text>
             </TouchableOpacity>
           </View>
+          <Text style={styles.hint}>Long-press to mark privately (hidden from friends)</Text>
         </View>
       )}
     />
@@ -130,7 +162,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0e6ff', color: '#6200EE',
     fontSize: 12, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10,
   },
+  friendsStrip: { fontSize: 13, color: '#00695C', marginTop: 8, fontWeight: '500' },
   actions: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  hint: { fontSize: 11, color: '#aaa', marginTop: 6, textAlign: 'center' },
   interestBtn: {
     flex: 1, borderWidth: 1, borderColor: '#ddd',
     borderRadius: 8, padding: 8, alignItems: 'center',

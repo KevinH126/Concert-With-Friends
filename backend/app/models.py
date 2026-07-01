@@ -21,6 +21,9 @@ class User(Base):
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     email = Column(Text, unique=True, nullable=False)
+    # Required at signup (enforced in the API) from P2 on; nullable in the DB only
+    # for legacy pre-P2 accounts, which set theirs via PATCH /users/me.
+    username = Column(Text, unique=True, nullable=True)
     display_name = Column(Text, nullable=False)
     hashed_password = Column(Text, nullable=False)
     home_metro_id = Column(Text, nullable=True)
@@ -95,6 +98,35 @@ class Friendship(Base):
     )
 
 
+class Invite(Base):
+    """Multi-use invite link: one token serves the whole group chat.
+
+    Redeeming creates an instant 'accepted' friendship with the inviter — generating
+    the link is the inviter's consent, so there is no approval step.
+    """
+
+    __tablename__ = "invites"
+
+    token = Column(Text, primary_key=True)
+    inviter_id = Column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    max_uses = Column(SmallInteger, nullable=False, default=25, server_default="25")
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)  # soft revoke keeps the audit trail
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    redemptions = relationship("InviteRedemption", back_populates="invite", cascade="all, delete-orphan")
+
+
+class InviteRedemption(Base):
+    __tablename__ = "invite_redemptions"
+
+    token = Column(Text, ForeignKey("invites.token", ondelete="CASCADE"), primary_key=True)
+    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    redeemed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    invite = relationship("Invite", back_populates="redemptions")
+
+
 class Event(Base):
     __tablename__ = "events"
 
@@ -118,9 +150,13 @@ class EventInterest(Base):
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     event_id = Column(UUID(as_uuid=False), ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
     level = Column(Text, nullable=False)
+    # Private interest still feeds YOUR notifications/feed, but is hidden from friends
+    # and excluded from the match results friends see about you.
+    visibility = Column(Text, nullable=False, default="shared", server_default="shared")
 
     __table_args__ = (
         CheckConstraint("level IN ('going','maybe')", name="ck_event_interest_level"),
+        CheckConstraint("visibility IN ('shared','private')", name="ck_event_interest_visibility"),
     )
 
     user = relationship("User", back_populates="event_interests")

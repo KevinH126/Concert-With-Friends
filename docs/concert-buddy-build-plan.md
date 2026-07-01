@@ -85,6 +85,12 @@ uvicorn app.main:app --reload                          # API at http://localhost
 > matching is testable but artist matching is not (the stub resolver returns no
 > `tm_attraction_id`). Real artist search/matching needs a key.
 
+**Run backend tests** (local Docker Postgres must be up; creates `concert_friends_test`):
+```bash
+cd backend
+../.venv/Scripts/python.exe -m pytest -q
+```
+
 **Run DB migrations:**
 ```bash
 cd backend
@@ -156,21 +162,54 @@ to prod. Don't stack deployment (hard) on top of the pipeline (hardest) at the e
       understand.
 - [ ] Each later phase = merge → migrate → deploy. Production is never a cliff.
 
-### P2 — Social graph + interest-marking
-- [ ] **Discovery:** invite-link / QR (QR = the invite link rendered) as the bootstrap;
-      username search for steady-state. (Phone + contacts deferred — see backlog.)
-- [ ] Friend requests with mutual consent (request → accept/decline); unfriend; block.
+### P2 — Social graph + interest-marking *(grilled + locked 2026-07-01)*
+- [ ] **Discovery — invites:** multi-use token (cap ~25 redemptions, ~7-day expiry,
+      revocable). Share artifact = `GET /invites/{token}` **HTML landing page** on the API
+      ("Kevin invited you — open the app and enter this code"); the in-app "enter invite
+      code" screen accepts the raw code **or** the pasted URL; QR = that URL rendered.
+      No deep links until a store build exists. Redemption happens **post-signup**
+      (optional invite-code field on the signup screen).
+- [ ] **Redeeming = instant `accepted` friendship** (requester = inviter). Generating the
+      link *is* consent — no approval step for people you invited. Schema change:
+      `invites.accepted_by` → an `invite_redemptions` audit table.
+- [ ] **Discovery — username search:** username **required at signup** (nullable in DB for
+      legacy accounts, who set it via profile); lowercase, 3–20 chars, `[a-z0-9_]`,
+      unique, stored normalized. Search = **prefix match, min 3 chars**, ~10 results,
+      excludes self + blocked pairs; each result carries friendship status so the UI
+      draws the right button.
+- [ ] **Friend requests with mutual consent** (request → accept/decline) for the
+      search path. **Decline, cancel-request, and unfriend all DELETE the row** — clean
+      slate, either side may re-request; no `declined` tombstone.
+- [ ] **Block = full mutual severance, silent.** Deletes any pair row, writes
+      `status='blocked'` with requester = blocker. Both directions: hidden from search,
+      requests fail generically, taste/interest invisible. Blocked user is never told;
+      only the blocker can unblock (delete → clean slate). Accepted edge: one row per
+      pair means the blockee can't also record a block.
 - [ ] **Interest-marking** (`going`/`maybe`) — pulled forward into P2 because it's the
-      highest-signal input to *both* matching and notifications. A friend graph where
-      nobody can express interest is inert.
+      highest-signal input to *both* matching and notifications. Upsert + delete-to-clear;
+      markable on any event by id, not just feed-matched ones.
 - [ ] **Private-interest flag from day one:** marking interest privately still feeds *your
       own* notifications and feed, but is hidden from friends and excluded from the match
       results friends see about you.
 - [ ] **Authz, decided explicitly:** taste + interest are **friends-only by default**;
       match disclosure is **symmetric** (mutual friends see each other's likely-match);
       location exposure is metro-grained. (Per-artist taste hiding → backlog.)
+- [ ] **Where it surfaces (two screens):** (1) **friend profile** — display name,
+      username, metro, artists w/ favorite–liked tier, genres, upcoming shared-visibility
+      interests; (2) **friends-on-feed strip** — event cards show which friends marked
+      shared interest ("Sam and Alex are going"). The strip is the seam P3's match scores
+      slot into. (No push until P5 — pending requests surface via the Friends tab on app
+      open.)
+- [ ] **Testing:** first automated pytest suite. **Authz matrix written test-first**
+      (non-friend sees nothing / friend sees shared-only / private invisible / block
+      hides both directions / double-request rejected); CRUD tests-after; plus
+      `docs/PHASE-2-TEST-PLAN.md` manual mobile checklist.
 - **Done when:** two real accounts become friends and see each other's permitted taste +
-  interest.
+  interest — and the authz suite is green.
+- **Honest status (2026-07-01):** backend + mobile **built**; 52-test suite (incl. the
+  full authz matrix) **green**; local migration applied. Remaining: run
+  `docs/PHASE-2-TEST-PLAN.md` on two devices, migrate prod, deploy. Known gap: unblock
+  has no mobile UI (API only).
 
 ### P3 — Matching *(+ compose-sheet chat hand-off)*
 - [ ] Score = weighted sum of: direct artist match (weighted by the favorite/liked tier;
@@ -276,7 +315,11 @@ Replaces the P3 compose-sheet hand-off button with a real system.
 | **Travel willingness** | A metro-set **filter** (tiers: `Local`/`Regional`/`Anywhere`) over the everywhere-sync, computed from **metro centroids, never user GPS**. Tier defaults now; per-artist override backlogged. |
 | **Location** | Single `home_metro_id`. Geolocation → nearest DMA **once** at onboarding, then discarded; editable via picker. |
 | **Discovery** | Invite-link / QR now; username search steady-state. Phone + contacts later (Identity & Discovery). |
+| **Invites (P2)** | **Multi-use** token (cap ~25, ~7-day expiry, revocable), `invite_redemptions` audit table. Artifact = API **HTML landing page** + in-app code entry (no deep links pre-store-build). **Redeem = instant accepted friendship.** |
+| **Usernames (P2)** | **Required at signup** (nullable for legacy); lowercase 3–20 `[a-z0-9_]`, unique. Search = **prefix, min 3 chars**, excludes self + blocked. |
+| **Friendship lifecycle (P2)** | Decline / cancel / unfriend **delete the row** (re-requestable). **Block = silent full mutual severance**, requester = blocker, blocker-only unblock. |
 | **Authz** | Taste + interest **friends-only** by default. **Private-interest flag** from day one. Match disclosure **symmetric**. |
+| **TDD ramp** | Test-first where behavior is a spec: **P2 authz matrix test-first** (CRUD tests-after) → **P3 scorer strict TDD** → **P4 pipeline strict TDD** (idempotency/digest as failing tests first) → P7 chat logic TDD, WS plumbing manual. |
 | **Pipeline** | Nightly per-metro diff → digest → `notifications_sent` ledger → **at-least-once w/ compensating claims**; **new-events-only** nightly, new-interest at add-time. |
 | **Genre discovery / recs** | **Held until P6** — need Spotify popularity + taste-proximity to rank. Pre-P6 feed = high-confidence artist matches only (protect feed trust). |
 
@@ -290,7 +333,9 @@ CREATE TABLE users (
     id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email              TEXT UNIQUE NOT NULL,
     display_name       TEXT NOT NULL,
-    username           TEXT UNIQUE,           -- for steady-state friend search
+    username           TEXT UNIQUE,           -- REQUIRED at signup (app-level) from P2 on;
+                                              -- nullable only for legacy pre-P2 accounts.
+                                              -- lowercase, 3–20 chars, [a-z0-9_]
     home_metro_id      TEXT,                  -- Ticketmaster DMA/market id
     location_precision TEXT NOT NULL DEFAULT 'metro'
                          CHECK (location_precision IN ('metro','city')),
@@ -349,13 +394,21 @@ CREATE UNIQUE INDEX friendship_pair_uniq
     ON friendships (LEAST(requester_id, addressee_id),
                     GREATEST(requester_id, addressee_id));
 
--- Invite links / QR (QR = this link rendered). Accepting forms the directional friendship.
+-- Invite links / QR (QR = this link rendered). MULTI-USE: one link serves the whole
+-- group chat. Redeeming creates an instant 'accepted' friendship with the inviter.
 CREATE TABLE invites (
     token       TEXT PRIMARY KEY,
     inviter_id  UUID REFERENCES users(id) ON DELETE CASCADE,
-    accepted_by UUID REFERENCES users(id),     -- null until redeemed
-    expires_at  TIMESTAMPTZ NOT NULL,
+    max_uses    SMALLINT NOT NULL DEFAULT 25,
+    expires_at  TIMESTAMPTZ NOT NULL,          -- default now() + 7 days
+    revoked_at  TIMESTAMPTZ,                   -- soft revoke; keeps the audit trail
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE invite_redemptions (
+    token       TEXT REFERENCES invites(token) ON DELETE CASCADE,
+    user_id     UUID REFERENCES users(id) ON DELETE CASCADE,
+    redeemed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (token, user_id)
 );
 
 -- Events cached from the API, keyed by external id. metro_id may be OUTSIDE the user's
@@ -490,6 +543,12 @@ a **soft** failure (no expansion for one artist), **never** on events, where a m
   single-user feed (auth, taste entry, event sync, feed, mobile). Read it before testing
   P1. Key gotcha: with no Ticketmaster API key the app runs in **stub mode**, where genre
   matching is testable but artist matching is not.
+- **TDD ramp (locked 2026-07-01):** test-first where the behavior is a spec, tests-after
+  for plumbing. **P2:** authz matrix test-first (pytest + httpx, first automated suite),
+  CRUD tests-after, manual mobile checklist in `docs/PHASE-2-TEST-PLAN.md`. **P3:** strict
+  TDD on the match scorer (pure function). **P4:** strict TDD on the pipeline —
+  "run twice → sends nothing" and "N events → 1 digest" exist as failing tests before the
+  pipeline code. **P7:** TDD chat persistence/read-state; WebSocket plumbing manual.
 - **Active virtualenv is `.venv/` at the repo root** (`.venv/Scripts/python.exe`), not
   `backend/venv/`.
 

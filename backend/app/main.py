@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import admin, artists, auth, feed, genres, users
+from app.routers import admin, artists, auth, feed, friends, genres, invites, users
 
 # Schema is managed by Alembic migrations (`alembic upgrade head`), not create_all.
 
@@ -22,6 +22,8 @@ app.include_router(users.router)
 app.include_router(artists.router)
 app.include_router(genres.router)
 app.include_router(feed.router)
+app.include_router(friends.router)
+app.include_router(invites.router)
 app.include_router(admin.router)
 
 

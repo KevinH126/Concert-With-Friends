@@ -10,6 +10,7 @@ export default function LoginScreen() {
   const { refresh } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,11 @@ export default function LoginScreen() {
           Alert.alert('Display name is required');
           return;
         }
-        await signup(email, displayName, password);
+        if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+          Alert.alert('Invalid username', 'Use 3-20 lowercase letters, numbers, or underscores.');
+          return;
+        }
+        await signup(email, username, displayName, password);
       }
       await refresh();
     } catch (e: any) {
@@ -42,13 +47,23 @@ export default function LoginScreen() {
       <Text style={styles.subtitle}>{mode === 'login' ? 'Sign in' : 'Create account'}</Text>
 
       {mode === 'signup' && (
-        <TextInput
-          style={styles.input}
-          placeholder="Display name"
-          value={displayName}
-          onChangeText={setDisplayName}
-          autoCapitalize="words"
-        />
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="Display name"
+            value={displayName}
+            onChangeText={setDisplayName}
+            autoCapitalize="words"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Username (lowercase, for friends to find you)"
+            value={username}
+            onChangeText={(t) => setUsername(t.toLowerCase())}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </>
       )}
       <TextInput
         style={styles.input}

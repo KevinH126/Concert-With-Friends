@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 10080  # 7 days
     ticketmaster_api_key: str = ""
     redis_url: str = "redis://localhost:6379/0"
+    # Public origin for links we hand out (invite landing pages). Falls back to the
+    # request's own base URL when unset, which can be http:// behind Render's proxy.
+    public_base_url: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
