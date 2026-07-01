@@ -11,7 +11,7 @@ databases:
     # Paid, persistent, daily backups. Free Postgres is DELETED ~90 days in.
     # Slug is hyphenated; legacy names (starter/standard) can't be used for new DBs.
     plan: basic-256mb
-    region: oregon # <-- change to the region nearest you
+    region: virginia # <-- change to the region nearest you
 
 services:
   - type: web
@@ -19,7 +19,7 @@ services:
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
-    region: oregon # <-- keep same region as the database
+    region: virginia # <-- keep same region as the database
     # Free web tier spins down when idle (cold start ~30-50s). Flip to a paid
     # plan (e.g. `standard`) BEFORE sharing the link publicly.
     plan: free
