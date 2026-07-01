@@ -132,7 +132,7 @@ on its own.
 P1    Solo feed                              ✅ done (sync is MANUAL, not scheduled yet)
 P1.5  Deploy the backend                     ✅ done (live on Render)
 P2    Social graph + interest-marking        ✅ done (verified on prod)
-P3    Matching  (+ compose-sheet chat hand-off)   ← next
+P3    Matching  (+ ranked feed, event search, compose-sheet hand-off)   ← next
 P3.5  UI pass                                (after P3 reshapes the feed card; before P4)
 P4    Notification pipeline                   ★ CENTERPIECE 1
 P5    Push delivery  (+ onboard the real friend group)
@@ -215,20 +215,58 @@ to prod. Don't stack deployment (hard) on top of the pipeline (hardest) at the e
   and invite-revoke have no mobile UI (API only). Test accounts left on prod:
   test_buddy / invite_pal (@example.com emails).
 
-### P3 — Matching *(+ compose-sheet chat hand-off)*
-- [ ] Score = weighted sum of: direct artist match (weighted by the favorite/liked tier;
-      favorite > liked) + genre match (**sub-genre match scores higher than broad-genre**)
-      + in-range (metro / travel-willingness) + already-marked-interest (near-certainty).
-- [ ] **The scorer takes a *taste-set* as input from day one.** In P3 that set is just
-      "your explicit artists." In **P6** the set grows (Spotify related artists) and the
-      scorer never changes. This avoids rewriting the matching core twice.
-- [ ] Rank **friends per event**; **symmetric** disclosure.
-- [ ] Feed headline: *"Band X is playing nearby — Sam and Alex would probably go with
-      you."*
-- [ ] **Compose-sheet chat hand-off:** when ≥2 friends are going, surface them and
-      deep-link to the OS share/compose sheet to start a thread elsewhere. This is a real
-      seam — in **P7** the button points *inward* to in-app chat instead of outward.
-- **Done when:** the app tells you *who* to go with, not just *what's* playing.
+### P3 — Matching *(grilled + locked 2026-07-01)*
+Matching **plus the feed's ranking brain** — one pure scorer used everywhere.
+- [ ] **Scorer (strict TDD, pure function):** `score(taste_set, event, ctx)` = weighted
+      sum of direct artist match (favorite > liked tier) + **hierarchical** genre match
+      (sub-genre > broad; a user's "Rock" matches rock sub-genres) + artist popularity +
+      friend-shared-interest (own-feed ranking) + own-marked-interest. The signature
+      **reserves an in-range/travel input** (constant in P3 — infra deferred, below).
+      Weights/thresholds/buckets are named tunable constants in
+      `backend/app/services/matching.py`.
+- [ ] **The scorer takes a *taste-set* as input from day one** — assembled **in-memory**
+      from `user_artists` + `user_genres` at request time. **No `user_taste_artists`
+      table in P3** (mirroring explicit picks = dual-write drift risk). P6 creates a
+      table for Spotify `related` rows *only*; the assembler unions it in; the scorer
+      never notices. "Taste-set from day one" is a *signature* promise, not storage.
+- [ ] **Feed is re-ranked** (chronological is dead): one list ordered by relevance score
+      with a **time-proximity boost** (nearer shows get a modest multiplier decaying over
+      ~90 days). A favorite artist months out still tops the list; among comparable
+      matches, sooner wins.
+- [ ] **Popularity term — TM proxy now, Spotify at P6:** store the attraction's
+      `upcomingEvents` count on `artists` during event sync (already in the response,
+      zero extra calls). Sinks random cafe-band genre matches below touring acts. P6
+      swaps in Spotify popularity; scorer shape unchanged.
+- [ ] **Full genre subsystem** (the P1 free-text box dies): fetch `classifications.json`
+      into a `tm_genres` reference table (name + parent), genre **picker** UI, parse +
+      store `subGenre` on events during sync, `is_subgenre` flag on `user_genres`. Also
+      fixes the silent case-mismatch bug free-text matching has today.
+- [ ] **Friend matching:** rank friends per event; **symmetric** disclosure; private
+      interest never feeds friend-visible results (not even as a scorer input). **One
+      strip** per card, ordered marked-going > marked-maybe > predicted. Prediction =
+      **two wording buckets** ("would probably go" / "might be into this"), weak hidden;
+      **no numbers or meters** (false precision from hand-tuned v1 weights — the bucket
+      rides in the API so P3.5 can re-skin it as stars later if the scorer earns it).
+- [ ] **Social pull-in:** feed inclusion = taste match **OR ≥1 friend with shared
+      going/maybe** — a friend's real interest beats a genre match as a signal; the
+      strip explains why the card is there ("Sam is going").
+- [ ] **Event search:** `GET /events/search?q=` over the **cached metro events**
+      (name/artist/venue) + a search bar on the feed screen. Closes the "mark interest
+      on any show" gap (the API has allowed it since P2; the UI had no path to find
+      non-matching events). Never a live TM call.
+- [ ] **Compose-sheet chat hand-off:** button appears at **≥1 friend with shared marked
+      interest** (you + one friend *is* a plan; the plan's old "≥2" would ~never fire in
+      a small graph). Predicted friends are listed as suggested invitees but never
+      trigger it. Share text = event name/venue/date + TM link (store `events.url` at
+      sync). In **P7** the button points *inward* to in-app chat instead.
+- [ ] **Travel-willingness infra DEFERRED** (metros table, centroids, travel-tier
+      columns, per-favorite-artist anywhere-sync): with no anywhere-sync there are zero
+      cross-metro events for an in-range term to distinguish — it would be dead code. It
+      lands with P4's scheduled jobs; the scorer's reserved input means nothing rewrites.
+- [ ] Scoring computes **inline at `GET /feed`** — closed graph (~10 friends × a few
+      hundred events) is trivial; no precompute before P4's job infra exists.
+- **Done when:** the feed is ranked and searchable, and event cards tell you *who* to go
+  with — marked friends first, predicted friends labeled by confidence.
 
 ### P3.5 — UI pass *(added 2026-07-01)*
 Deliberately scheduled **after P3** (matching reshapes the feed card — the app's
@@ -332,7 +370,14 @@ Replaces the P3 compose-sheet hand-off button with a real system.
 | **Genre entry** | Picker from TM taxonomy; pick at genre **or** sub-genre; **sub-genre match scores higher**; match hierarchically (a user's "Rock" matches rock sub-genres). |
 | **Favorite vs liked** | The `user_artists.weight` tier. Triple duty: **travel scope + sync scope + match weight.** |
 | **Event caches (two)** | Per-metro (scheduled, discovery) **+** per-favorite-artist (`attractionId`, "anywhere"). The second is cheap *because* the graph is closed (small favorites set). |
-| **Travel willingness** | A metro-set **filter** (tiers: `Local`/`Regional`/`Anywhere`) over the everywhere-sync, computed from **metro centroids, never user GPS**. Tier defaults now; per-artist override backlogged. |
+| **Travel willingness** | A metro-set **filter** (tiers: `Local`/`Regional`/`Anywhere`) over the everywhere-sync, computed from **metro centroids, never user GPS**. **Infra deferred to P4** (no anywhere-sync = no cross-metro events yet); the P3 scorer reserves the input slot. Per-artist override backlogged. |
+| **Feed ranking (P3)** | One list: relevance score + **time-proximity boost** (~90-day decay). Chronological order is dead. |
+| **Popularity (P3)** | TM attraction `upcomingEvents` count stored on `artists` at sync = proxy popularity term; **Spotify popularity swaps in at P6**, scorer shape unchanged. |
+| **Taste-set (P3)** | Assembled **in-memory** from `user_artists`+`user_genres`; no `user_taste_artists` until P6, and then **`related` rows only** (no dual-write of explicit picks). |
+| **Match display (P3)** | One strip: marked-going > marked-maybe > predicted. Two wording buckets ("would probably go" / "might be into this"); **no numeric scores or meters**. Symmetric; private interest never friend-visible. |
+| **Social pull-in (P3)** | Feed inclusion = taste match **OR** ≥1 friend w/ shared going/maybe. |
+| **Event search (P3)** | `GET /events/search` over **cached metro events** + feed search bar. Never live TM (typeahead stays the only per-user TM call). |
+| **Compose sheet (P3)** | Trigger = **≥1 friend** with shared *marked* interest; predicted friends = suggested invitees only. Share text carries the TM link (`events.url`). |
 | **Location** | Single `home_metro_id`. Geolocation → nearest DMA **once** at onboarding, then discarded; editable via picker. |
 | **Discovery** | Invite-link / QR now; username search steady-state. Phone + contacts later (Identity & Discovery). |
 | **Invites (P2)** | **Multi-use** token (cap ~25, ~7-day expiry, revocable), `invite_redemptions` audit table. Artifact = API **HTML landing page** + in-app code entry (no deep links pre-store-build). **Redeem = instant accepted friendship.** |
@@ -381,7 +426,18 @@ CREATE TABLE artists (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tm_attraction_id TEXT UNIQUE,             -- Ticketmaster attractionId
     spotify_id       TEXT UNIQUE,             -- filled in P6 (soft-fail if no match)
-    name             TEXT NOT NULL
+    name             TEXT NOT NULL,
+    -- P3: touring-scale proxy for popularity (TM attraction upcomingEvents count,
+    -- captured free during event sync). P6 replaces it with Spotify popularity.
+    tm_upcoming_events SMALLINT
+);
+
+-- P3: TM genre taxonomy cache (classifications.json, fetched once). Powers the genre
+-- picker + hierarchical matching (a user's "Rock" matches rock sub-genres).
+CREATE TABLE tm_genres (
+    tm_id        TEXT PRIMARY KEY,            -- TM classification id
+    name         TEXT NOT NULL,
+    parent_tm_id TEXT REFERENCES tm_genres(tm_id)  -- NULL = broad genre; set = sub-genre
 );
 
 -- Who likes whom. weight = the favorite/liked tier (favorite > liked).
@@ -442,6 +498,8 @@ CREATE TABLE events (
     metro_id     TEXT,
     starts_at    TIMESTAMPTZ,
     genre        TEXT,
+    subgenre     TEXT,                        -- P3: TM subGenre (sub-genre match scores higher)
+    url          TEXT,                        -- P3: TM event link (compose-sheet share text)
     fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -456,12 +514,13 @@ CREATE TABLE event_interest (
     PRIMARY KEY (user_id, event_id)
 );
 
--- P6: expanded taste set (adjacent artists from Spotify related-artists).
--- This is what the P3 scorer consumes; P3 seeds it with 'explicit' rows only.
+-- P6 ONLY: Spotify-derived adjacent artists ('related' rows exclusively — explicit
+-- picks stay in user_artists, never mirrored here; the taste-set assembler unions the
+-- two at read time). Locked P3 decision: no dual-write of explicit taste.
 CREATE TABLE user_taste_artists (
     user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
     artist_id  UUID REFERENCES artists(id) ON DELETE CASCADE,
-    source     TEXT NOT NULL CHECK (source IN ('explicit','related')),
+    source     TEXT NOT NULL CHECK (source = 'related'),
     score      REAL NOT NULL DEFAULT 1.0,
     PRIMARY KEY (user_id, artist_id)
 );
