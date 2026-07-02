@@ -2,14 +2,22 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Artist, Event, EventInterest, User, UserArtist, UserGenre
+from app.models import Event, EventInterest, User
 from app.services import social
+from app.services.matching import (
+    EventFacts,
+    ScoringCtx,
+    assemble_taste_set,
+    load_genre_parents,
+    prediction_bucket,
+    score,
+)
 
 router = APIRouter(prefix="/feed", tags=["feed"])
 
@@ -20,6 +28,12 @@ class FriendGoing(BaseModel):
     level: str  # 'going' | 'maybe'
 
 
+class FriendPredicted(BaseModel):
+    user_id: str
+    display_name: str
+    bucket: str  # 'probably' ("would probably go") | 'might' ("might be into this")
+
+
 class EventResponse(BaseModel):
     id: str
     name: str
@@ -27,12 +41,26 @@ class EventResponse(BaseModel):
     venue_name: str | None
     starts_at: datetime | None
     genre: str | None
+    url: str | None
     my_interest: str | None  # 'going' | 'maybe' | None
     my_interest_visibility: str | None  # 'shared' | 'private' | None
+    # One strip, ordered marked-going > marked-maybe > predicted. No numeric scores
+    # ever ride the API — the bucket is the only confidence signal.
     friends_going: list[FriendGoing] = []
+    friends_predicted: list[FriendPredicted] = []
 
     class Config:
         from_attributes = True
+
+
+def _event_facts(e: Event) -> EventFacts:
+    return EventFacts(
+        artist_id=e.artist_id,
+        genre=e.genre,
+        subgenre=e.subgenre,
+        artist_popularity=(e.artist.tm_upcoming_events or 0) if e.artist else 0,
+        starts_at=e.starts_at,
+    )
 
 
 @router.get("", response_model=list[EventResponse])
@@ -46,40 +74,22 @@ async def get_feed(
             detail="Set your home metro before viewing the feed. PATCH /auth/me with home_metro_id.",
         )
 
-    # Collect this user's artist IDs and genres
-    artist_rows = await db.execute(
-        select(UserArtist.artist_id).where(UserArtist.user_id == current_user.id)
-    )
-    artist_ids = [r[0] for r in artist_rows.all()]
-
-    genre_rows = await db.execute(
-        select(UserGenre.genre).where(UserGenre.user_id == current_user.id)
-    )
-    genres = [r[0] for r in genre_rows.all()]
-
     now = datetime.now(timezone.utc)
 
-    # Events in this metro that match artist OR genre, upcoming only
-    filters = [Event.metro_id == current_user.home_metro_id, Event.starts_at >= now]
-    match_clause = []
-    if artist_ids:
-        match_clause.append(Event.artist_id.in_(artist_ids))
-    if genres:
-        match_clause.append(Event.genre.in_(genres))
-
-    if not match_clause:
-        return []
-
+    # All upcoming events in the metro; inclusion is decided by score, not SQL —
+    # the closed graph (a few hundred events) makes inline scoring trivial (pre-P4).
     result = await db.execute(
         select(Event)
         .options(selectinload(Event.artist))
-        .where(*filters, or_(*match_clause))
-        .order_by(Event.starts_at)
+        .where(Event.metro_id == current_user.home_metro_id, Event.starts_at >= now)
     )
     events = result.scalars().all()
-
-    # Fetch the user's interests for these event IDs
     event_ids = [e.id for e in events]
+
+    my_taste = await assemble_taste_set(db, current_user.id, friend_visible=False)
+    genre_parents = await load_genre_parents(db)
+
+    # My interests for these events
     interest_rows = await db.execute(
         select(EventInterest).where(
             EventInterest.user_id == current_user.id,
@@ -88,8 +98,9 @@ async def get_feed(
     )
     interests = {i.event_id: i for i in interest_rows.scalars().all()}
 
-    # Friends-going strip: friends' SHARED interest only — private never leaves its owner.
+    # Friends' SHARED interest only — private never leaves its owner.
     friends_going: dict[str, list[FriendGoing]] = {}
+    marked_by_event: dict[str, set[str]] = {}
     friend_id_list = await social.friend_ids(db, current_user.id)
     if friend_id_list and event_ids:
         rows = await db.execute(
@@ -105,6 +116,57 @@ async def get_feed(
             friends_going.setdefault(interest.event_id, []).append(
                 FriendGoing(user_id=user.id, display_name=user.display_name, level=interest.level)
             )
+            marked_by_event.setdefault(interest.event_id, set()).add(user.id)
+
+    # Friend predictions: each friend's FRIEND-VISIBLE taste (shared marks only —
+    # the two-taste-set privacy rule), scored on taste alone (no social echo).
+    friend_users: dict[str, User] = {}
+    friend_tastes = {}
+    if friend_id_list:
+        user_rows = await db.execute(select(User).where(User.id.in_(friend_id_list)))
+        friend_users = {u.id: u for u in user_rows.scalars().all()}
+        for fid in friend_id_list:
+            friend_tastes[fid] = await assemble_taste_set(db, fid, friend_visible=True)
+    taste_only_ctx = ScoringCtx(
+        now=now, genre_parents=genre_parents, friends_going=0, friends_maybe=0, own_interest=None
+    )
+
+    scored: list[tuple[float, Event]] = []
+    predictions: dict[str, list[FriendPredicted]] = {}
+    for e in events:
+        facts = _event_facts(e)
+        marked = marked_by_event.get(e.id, set())
+        strip = friends_going.get(e.id, [])
+        my_ctx = ScoringCtx(
+            now=now,
+            genre_parents=genre_parents,
+            friends_going=sum(1 for f in strip if f.level == "going"),
+            friends_maybe=sum(1 for f in strip if f.level == "maybe"),
+            own_interest=interests[e.id].level if e.id in interests else None,
+        )
+        my_score = score(my_taste, facts, my_ctx)
+        if my_score <= 0:
+            continue  # inclusion = taste match OR friend interest OR own mark — all live in the score
+        scored.append((my_score, e))
+
+        for fid, f_taste in friend_tastes.items():
+            if fid in marked:
+                continue  # already on the strip as a real mark — never double-listed
+            bucket = prediction_bucket(score(f_taste, facts, taste_only_ctx))
+            if bucket is not None:
+                predictions.setdefault(e.id, []).append(
+                    FriendPredicted(
+                        user_id=fid,
+                        display_name=friend_users[fid].display_name,
+                        bucket=bucket,
+                    )
+                )
+
+    # Relevance order; ties (same score) break toward the sooner show.
+    scored.sort(key=lambda pair: (-pair[0], pair[1].starts_at or now))
+
+    def _strip_order(entry: FriendGoing) -> int:
+        return 0 if entry.level == "going" else 1
 
     return [
         EventResponse(
@@ -114,11 +176,15 @@ async def get_feed(
             venue_name=e.venue_name,
             starts_at=e.starts_at,
             genre=e.genre,
+            url=e.url,
             my_interest=interests[e.id].level if e.id in interests else None,
             my_interest_visibility=interests[e.id].visibility if e.id in interests else None,
-            friends_going=friends_going.get(e.id, []),
+            friends_going=sorted(friends_going.get(e.id, []), key=_strip_order),
+            friends_predicted=sorted(
+                predictions.get(e.id, []), key=lambda p: 0 if p.bucket == "probably" else 1
+            ),
         )
-        for e in events
+        for _, e in scored
     ]
 
 
