@@ -6,6 +6,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Event, EventInterest, UserArtist, UserGenre
+
 
 @dataclass(frozen=True)
 class TasteSet:
@@ -127,6 +132,49 @@ def score(taste: TasteSet, event: EventFacts, ctx: ScoringCtx) -> float:
     if base > 0:
         base += _popularity_term(event)
     return (base + _social_term(ctx)) * _time_multiplier(event, ctx)
+
+
+# user_artists.weight tier boundary: >= this is a favorite, below is liked.
+FAVORITE_WEIGHT_MIN = 2
+
+
+async def assemble_taste_set(db: AsyncSession, user_id: str, *, friend_visible: bool) -> TasteSet:
+    """Build a user's TasteSet in-memory at request time (no storage — a signature
+    promise). friend_visible=True is the variant fed into predictions other users
+    see; it must never learn from private marks."""
+    artist_rows = await db.execute(
+        select(UserArtist.artist_id, UserArtist.weight).where(UserArtist.user_id == user_id)
+    )
+    favorites, liked = set(), set()
+    for artist_id, weight in artist_rows.all():
+        (favorites if weight >= FAVORITE_WEIGHT_MIN else liked).add(artist_id)
+
+    genre_rows = await db.execute(select(UserGenre.genre).where(UserGenre.user_id == user_id))
+    genres = {row[0] for row in genre_rows.all()}
+
+    history_query = (
+        select(EventInterest.level, Event.artist_id, Event.genre)
+        .join(Event, Event.id == EventInterest.event_id)
+        .where(EventInterest.user_id == user_id)
+    )
+    if friend_visible:
+        history_query = history_query.where(EventInterest.visibility == "shared")
+    history_rows = await db.execute(history_query)
+    history_going, history_maybe, history_genres = set(), set(), set()
+    for level, artist_id, genre in history_rows.all():
+        if artist_id is not None:
+            (history_going if level == "going" else history_maybe).add(artist_id)
+        if genre is not None:
+            history_genres.add(genre)
+
+    return TasteSet(
+        favorite_artist_ids=frozenset(favorites),
+        liked_artist_ids=frozenset(liked),
+        history_going_artist_ids=frozenset(history_going),
+        history_maybe_artist_ids=frozenset(history_maybe),
+        genres=frozenset(genres),
+        history_genres=frozenset(history_genres),
+    )
 
 
 def prediction_bucket(value: float) -> str | None:
