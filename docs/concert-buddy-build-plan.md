@@ -225,10 +225,22 @@ Matching **plus the feed's ranking brain** — one pure scorer used everywhere.
       Weights/thresholds/buckets are named tunable constants in
       `backend/app/services/matching.py`.
 - [ ] **The scorer takes a *taste-set* as input from day one** — assembled **in-memory**
-      from `user_artists` + `user_genres` at request time. **No `user_taste_artists`
-      table in P3** (mirroring explicit picks = dual-write drift risk). P6 creates a
-      table for Spotify `related` rows *only*; the assembler unions it in; the scorer
-      never notices. "Taste-set from day one" is a *signature* promise, not storage.
+      from `user_artists` + `user_genres` + **interest history** at request time. **No
+      `user_taste_artists` table in P3** (mirroring explicit picks = dual-write drift
+      risk). P6 fills a table with *imported* Spotify rows only; the assembler unions
+      it in; the scorer never notices. "Taste-set from day one" is a *signature*
+      promise, not storage.
+- [ ] **Interest-history signal** *(added 2026-07-02)*: each going/maybe mark feeds the
+      event's **artist and genre** into the taste-set at implicit weight — going >
+      maybe, both **below explicit favorites** (tiers pinned in the scorer's TDD
+      suite). Revealed preference: marking a hardcore show teaches the scorer you're
+      open to hardcore even if you never picked the genre.
+- [ ] **Two taste-set variants** *(added 2026-07-02 — privacy side-channel fix)*:
+      friend-visible predictions ("Sam would probably go") build only from explicit
+      picks + **shared** marks; your own feed ranking uses everything **including
+      private marks**. Otherwise private marks would leak taste through the predictions
+      friends see — upholds the locked "private never feeds friend-visible results,
+      not even as a scorer input" rule.
 - [ ] **Feed is re-ranked** (chronological is dead): one list ordered by relevance score
       with a **time-proximity boost** (nearer shows get a modest multiplier decaying over
       ~90 days). A favorite artist months out still tops the list; among comparable
@@ -301,6 +313,22 @@ Scheduled background job (Celery beat), not request-driven. This is the resume s
 - [ ] **Scope = new events only** for the nightly job. *New relevance* (a user adds an
       artist whose show was already cached) is handled separately by an **immediate
       check at add-time**, not the nightly diff.
+- [ ] **Friend-mark ping** *(added 2026-07-02)*: when a user marks **shared**
+      going/maybe, instantly ping their friends **in the event's metro** ("Sam is going
+      to Turnstile Aug 14 — wanna join?"). No taste filter — a friend's real interest
+      outranks the scorer's opinion of the recipient; cross-metro friends see it in-app
+      only (feed strip). Batched: multiple friends marking the same event aggregate
+      into one thread, never one ping per friend. Private marks never fire it.
+- [ ] **Digest lines carry social context** *(added 2026-07-02)*: "New: Turnstile
+      Aug 14 — **Sam is going**." Marked + shared interest only; **never predictions
+      about a third party** (a model guess about Sam doesn't belong in a push to Alex).
+- [ ] **One ledger row per (recipient, event) across BOTH ping kinds** — a friend-mark
+      ping automatically suppresses the digest line for that event and vice versa; no
+      double-touch on the same show.
+- [ ] **No prediction-based pushes** (rejected 2026-07-02): "3 friends might want to
+      join you" pings you about a model guess at exactly the moment the compose sheet
+      already shows it passively. Predictions stay on pull surfaces (card strip,
+      compose sheet). Revisit only if post-P6 predictions earn trust.
 - [ ] **Rate-sanity:** per-metro pulls, aggressive caching, stay under 5k/day.
 - **"I built an idempotent, deduplicated notification pipeline and chose at-least-once
   delivery because a missed concert alert is worse than a duplicate" is the sentence that
@@ -312,16 +340,52 @@ The fiddly plumbing, kept separate from the pipeline so it can't sink the center
 - [ ] **Refresh the token on rotation** — stale tokens are the silent killer of push.
 - [ ] Expo push send; handle iOS/Android; handle send failures (feeds the P4 failure dial).
 
-### P6 — Taste-set expansion (Spotify)
+### P6 — Taste-set expansion (Spotify) *(re-grilled 2026-07-02 — API reality check)*
 Pure enrichment — *grows the set the scorer already consumes*, restructures nothing.
-- [ ] Resolve each liked artist to a Spotify ID *(fuzzy match — see the mapping note;
-      a miss here is a **soft** failure: you just don't get expansion for that artist)*.
-- [ ] Pull **related artists** + genre tags; store an expanded "taste set" per user.
-- [ ] Matching now lights up on adjacent artists (likes Radiohead → Thom Yorke, etc.).
-- [ ] **Unlocks ranked genre discovery + artist recommendations** (both held until now):
-      Spotify's `popularity` score and **taste-proximity** (related-to-what-you-like) give
-      a *good* ranking — better than raw popularity — so genre-discovery recs and
-      "artists you might like" can finally ship without feeling random.
+
+> **Spotify API wall (verified 2026-07-02):** related-artists / recommendations /
+> audio-features endpoints are **gone for new apps** (Nov 2024). Since **Feb 2026** a
+> new Development-Mode app gets **5 manually-allowlisted users**, 1 app per developer,
+> and the owner must hold Premium; Extended Quota Mode is effectively reserved for
+> established businesses. Still readable per linked user: **top artists** (`/me/top`),
+> followed artists, saved tracks, playlists, single-artist lookups (with `popularity`).
+
+- [ ] **Pluggable taste-import seam.** Manual picker + interest history stay the
+      primary onboarding; listening data arrives through interchangeable import
+      sources behind one seam. If Spotify quota ever loosens (or this becomes a real
+      business), reordering sources is config, not a rewrite.
+- [ ] **Last.fm relay — the capless default import** *(added 2026-07-02)*: Spotify has
+      an official first-party connection to Last.fm (link once on last.fm/about/
+      trackmymusic; every Spotify play scrobbles automatically). Last.fm's API is open —
+      free key, **no per-app user cap**, and `user.getTopArtists` reads by *username*
+      (public by default, no OAuth). Onboarding: "connect Spotify→Last.fm, give us your
+      Last.fm username." Caveat: scrobbles accrue from link-time forward, so a fresh
+      link needs ~2 weeks of listening before top-artists means anything — manual picks
+      + interest history carry the user until then.
+- [ ] **GDPR self-export upload — the power-user import** *(added 2026-07-02)*: users
+      request their own data ZIP from Spotify's privacy page (basic export lands in
+      days; JSON of streaming history, liked songs, playlists, followed artists) and
+      upload it. ToS-clean, unlimited users, richest data (lifetime play counts —
+      it's how stats.fm/ListenBrainz get history the API won't give). Too slow/manual
+      for the default path; ship as an "import your Spotify export" option.
+- [ ] **Spotify OAuth import — inner-circle bonus source**: for the 5 allowlisted
+      users, top artists (medium + long term) enter at the **explicit-favorite tier** —
+      Spotify's measured play ranking beats a hand-pick. Followed + saved-track artists
+      enter at the implicit tier. **No playlist scanning in v1**: collab playlists,
+      party mixes, and one-off adds all look identical to genuine taste, and it's extra
+      API surface for the same 5 users. (Last.fm top artists and GDPR-export play
+      counts map onto the same two tiers: measured ranking → favorite tier, long-tail
+      artists → implicit tier.)
+- [ ] Map imported artists (any source) → local `artists` rows *(fuzzy name match — see
+      the mapping note; a miss is a **soft** failure: that one artist just doesn't
+      import)*.
+- [ ] `user_taste_artists` stores **imported rows only** (`source` says which import
+      surface — Spotify/Last.fm/GDPR export); explicit picks stay in `user_artists`;
+      the assembler unions at read time. The old "`related` rows" design died with the
+      endpoint.
+- [ ] **Ranked discovery ships weaker than originally hoped:** taste-proximity
+      (related-artists) is dead, so genre-discovery recs rank on Spotify `popularity` +
+      hierarchical genre overlap only.
 
 ### P7 — In-app chat ★ CENTERPIECE 2
 Replaces the P3 compose-sheet hand-off button with a real system.
@@ -350,6 +414,13 @@ Replaces the P3 compose-sheet hand-off button with a real system.
   *defaults* ship now; the per-artist control is polish.
 - **Per-artist taste hiding** — "hide this guilty-pleasure artist from friends."
 - **Store-installable mobile build** (EAS/TestFlight).
+- **Negative signals ("not interested")** — feed-card dismissal that suppresses the
+  event and dampens its artist/genre in the taste-set (new UI + dismissals table).
+  Backlogged for P3.5/P4: once the feed is scorer-ranked, a wrong confident guess
+  sitting at the top has no user remedy without it.
+- **Friend taste-similarity term** — collaborative boost for friends who repeatedly
+  mark the same shows. Deferred until post-P6 at the earliest: with sparse mark data,
+  two overlapping marks are noise, not signal.
 
 ### Ruled out (don't build toward these)
 - **Auto-creating an iMessage group chat from the app — impossible.** iOS exposes no
@@ -373,7 +444,7 @@ Replaces the P3 compose-sheet hand-off button with a real system.
 | **Travel willingness** | A metro-set **filter** (tiers: `Local`/`Regional`/`Anywhere`) over the everywhere-sync, computed from **metro centroids, never user GPS**. **Infra deferred to P4** (no anywhere-sync = no cross-metro events yet); the P3 scorer reserves the input slot. Per-artist override backlogged. |
 | **Feed ranking (P3)** | One list: relevance score + **time-proximity boost** (~90-day decay). Chronological order is dead. |
 | **Popularity (P3)** | TM attraction `upcomingEvents` count stored on `artists` at sync = proxy popularity term; **Spotify popularity swaps in at P6**, scorer shape unchanged. |
-| **Taste-set (P3)** | Assembled **in-memory** from `user_artists`+`user_genres`; no `user_taste_artists` until P6, and then **`related` rows only** (no dual-write of explicit picks). |
+| **Taste-set (P3)** | Assembled **in-memory** from `user_artists`+`user_genres`+**interest history** (each mark feeds the event's artist+genre at implicit weight; going > maybe, both below explicit favorites). **Two variants:** friend-visible predictions = explicit picks + shared marks only; own feed = everything incl. private. No `user_taste_artists` until P6, and then **imported Spotify rows only** (no dual-write of explicit picks). |
 | **Match display (P3)** | One strip: marked-going > marked-maybe > predicted. Two wording buckets ("would probably go" / "might be into this"); **no numeric scores or meters**. Symmetric; private interest never friend-visible. |
 | **Social pull-in (P3)** | Feed inclusion = taste match **OR** ≥1 friend w/ shared going/maybe. |
 | **Event search (P3)** | `GET /events/search` over **cached metro events** + feed search bar. Never live TM (typeahead stays the only per-user TM call). |
@@ -386,7 +457,9 @@ Replaces the P3 compose-sheet hand-off button with a real system.
 | **Authz** | Taste + interest **friends-only** by default. **Private-interest flag** from day one. Match disclosure **symmetric**. |
 | **TDD ramp** | Test-first where behavior is a spec: **P2 authz matrix test-first** (CRUD tests-after) → **P3 scorer strict TDD** → **P4 pipeline strict TDD** (idempotency/digest as failing tests first) → P7 chat logic TDD, WS plumbing manual. |
 | **Pipeline** | Nightly per-metro diff → digest → `notifications_sent` ledger → **at-least-once w/ compensating claims**; **new-events-only** nightly, new-interest at add-time. |
-| **Genre discovery / recs** | **Held until P6** — need Spotify popularity + taste-proximity to rank. Pre-P6 feed = high-confidence artist matches only (protect feed trust). |
+| **Notify triggers (P4)** | **A + C, no B** (2026-07-02): friend's shared mark → **instant ping to same-metro friends** (no taste filter; batched; private never fires); digest lines carry "Sam is going" (marked+shared only, never third-party predictions). One ledger row per (recipient, event) across both kinds. **No prediction-based pushes** — predictions stay on pull surfaces. |
+| **Spotify (P6)** | API wall (Feb 2026): dev mode = **5 allowlisted users**, related-artists/recommendations **dead for new apps**; Extended Quota = registered business w/ 250k MAU (unreachable). **Pluggable import seam**, sources in order: manual picker + interest history (primary) → **Last.fm relay** (capless default: official Spotify→Last.fm scrobble + open API by username, no OAuth) → **GDPR-export upload** (power users, lifetime history) → Spotify OAuth (5 inner-circle). Measured ranking → favorite tier; long-tail/followed/saved → implicit tier; **no playlist scanning v1**. |
+| **Genre discovery / recs** | **Held until P6** — ranked by Spotify popularity + genre overlap (**taste-proximity is dead** with the related-artists endpoint). Pre-P6 feed = high-confidence artist matches only (protect feed trust). |
 
 ---
 
@@ -514,19 +587,22 @@ CREATE TABLE event_interest (
     PRIMARY KEY (user_id, event_id)
 );
 
--- P6 ONLY: Spotify-derived adjacent artists ('related' rows exclusively — explicit
--- picks stay in user_artists, never mirrored here; the taste-set assembler unions the
--- two at read time). Locked P3 decision: no dual-write of explicit taste.
+-- P6 ONLY: imported Spotify rows exclusively — explicit picks stay in user_artists,
+-- never mirrored here; the taste-set assembler unions the two at read time. Locked P3
+-- decision: no dual-write of explicit taste. (Was 'related' rows; that endpoint is
+-- dead for new apps as of Nov 2024.)
 CREATE TABLE user_taste_artists (
     user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
     artist_id  UUID REFERENCES artists(id) ON DELETE CASCADE,
-    source     TEXT NOT NULL CHECK (source = 'related'),
+    source     TEXT NOT NULL CHECK (source IN ('spotify_top','spotify_followed','spotify_saved','lastfm_top','gdpr_export')),
     score      REAL NOT NULL DEFAULT 1.0,
     PRIMARY KEY (user_id, artist_id)
 );
 
 -- P4: idempotency ledger so the pipeline never double-notifies. Claimed with
 -- ON CONFLICT DO NOTHING; committed after the push succeeds (at-least-once).
+-- One row per (recipient, event) across BOTH ping kinds (digest + friend-mark ping) —
+-- each automatically suppresses the other for the same event.
 CREATE TABLE notifications_sent (
     user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
     event_id   UUID REFERENCES events(id) ON DELETE CASCADE,
@@ -578,9 +654,15 @@ Base: `https://app.ticketmaster.com/discovery/v2/`  (pass `apikey=` on every cal
   `classifications.json?apikey=...`
 - Watch the `Rate-Limit-Available` response header; back off at 429.
 
-Spotify (P6): artist search + **related artists** endpoints build the expanded taste set
-and provide `popularity` for ranked discovery. Resolve names → Spotify IDs once and store
-on the `artists` row.
+Spotify (P6): **dev-mode survivors only** — `/me/top` (top artists), followed artists,
+saved tracks; `popularity` via single-artist lookup. Related-artists/recommendations are
+**dead for new apps**, and the 5-user allowlist applies (see P6). Map imported Spotify
+artists → local `artists` rows by fuzzy name match; store the Spotify ID on the row.
+
+Last.fm (P6 relay): open API, free non-commercial key, **no user cap, no OAuth** —
+`user.getTopArtists&user={username}` and `user.getRecentTracks` read public listening
+data by username. Users pipe Spotify into it via the official scrobble connection
+(last.fm/about/trackmymusic).
 
 ---
 
@@ -599,8 +681,8 @@ pipeline; the P3 compose-sheet button is the seam it slots into.
 **Artist ↔ Spotify mapping (P6).** Spotify and Ticketmaster share no common id, so mapping
 is **fuzzy name matching** (ambiguity, normalization, coverage gaps) — a quiet
 entity-resolution subsystem. It's deliberately placed on *enrichment* (P6), where a miss is
-a **soft** failure (no expansion for one artist), **never** on events, where a miss would
-**break the core feed**. That asymmetry is *why* artist search is TM-first.
+a **soft** failure (one imported artist doesn't map), **never** on events, where a miss
+would **break the core feed**. That asymmetry is *why* artist search is TM-first.
 
 ---
 
