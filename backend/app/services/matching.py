@@ -147,7 +147,11 @@ async def load_genre_parents(db: AsyncSession) -> dict[str, str]:
     return {
         g.name: names[g.parent_tm_id]
         for g in genres
-        if g.parent_tm_id is not None and g.parent_tm_id in names
+        # Skip TM's same-named subgenres — a "Rock"→"Rock" mapping is meaningless
+        # (exact match already covers it) and would shadow real entries.
+        if g.parent_tm_id is not None
+        and g.parent_tm_id in names
+        and g.name != names[g.parent_tm_id]
     }
 
 

@@ -9,6 +9,9 @@ from tests.conftest import create_user
 async def seed_taxonomy(db_session):
     db_session.add(TmGenre(tm_id="G_ROCK", name="Rock", parent_tm_id=None))
     db_session.add(TmGenre(tm_id="SG_INDIE", name="Indie Rock", parent_tm_id="G_ROCK"))
+    # TM's real taxonomy has a same-named subgenre under nearly every broad genre
+    # (genre "Rock" → subgenre "Rock") — regression fodder for the 500 this caused.
+    db_session.add(TmGenre(tm_id="SG_ROCK_DUP", name="Rock", parent_tm_id="G_ROCK"))
     db_session.add(TmGenre(tm_id="G_JAZZ", name="Jazz", parent_tm_id=None))
     await db_session.commit()
 
@@ -71,6 +74,30 @@ class TestGenrePicker:
         resp = await client.post("/genres", json={"genre": "Indie Rock"}, headers=headers)
         assert resp.status_code == 201
         assert resp.json() == ["Indie Rock"]
+
+    async def test_ambiguous_name_prefers_broad_genre(self, client, db_session):
+        """TM has genre 'Rock' AND subgenre 'Rock' — picking 'Rock' must resolve to
+        the broad genre (hierarchical match, wider net), never 500 on ambiguity."""
+        await seed_taxonomy(db_session)
+        user_id, headers = await create_user(client, "ambiguoususer")
+
+        resp = await client.post("/genres", json={"genre": "Rock"}, headers=headers)
+        assert resp.status_code == 201
+
+        from sqlalchemy import select
+        from app.models import UserGenre
+        row = (await db_session.execute(
+            select(UserGenre).where(UserGenre.user_id == user_id)
+        )).scalar_one()
+        assert row.is_subgenre is False
+
+    async def test_taxonomy_hides_same_named_subgenres(self, client, db_session):
+        await seed_taxonomy(db_session)
+        _, headers = await create_user(client, "dedupeuser")
+
+        resp = await client.get("/genres/taxonomy", headers=headers)
+        taxonomy = {g["name"]: g["subgenres"] for g in resp.json()}
+        assert taxonomy["Rock"] == ["Indie Rock"]  # the duplicate "Rock" sub is noise
 
     async def test_free_text_genre_is_rejected(self, client, db_session):
         await seed_taxonomy(db_session)

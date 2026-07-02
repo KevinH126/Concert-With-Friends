@@ -33,7 +33,8 @@ async def genre_taxonomy(
     for row in rows:
         if row.parent_tm_id is not None:
             parent = by_id.get(row.parent_tm_id)
-            if parent is not None:
+            # TM's same-named subgenres ("Rock" under "Rock") are noise in a picker.
+            if parent is not None and row.name != parent.name:
                 grouped.setdefault(parent.name, []).append(row.name)
     return [
         TaxonomyGenre(name=name, subgenres=sorted(subs))
@@ -58,8 +59,13 @@ async def add_genre(
 ):
     # The P1 free-text box is dead: genres must come from the TM taxonomy (canonical
     # casing included — this is what fixes the silent case-mismatch matching bug).
-    tm_row = await db.execute(select(TmGenre).where(TmGenre.name == body.genre))
-    tm_genre = tm_row.scalar_one_or_none()
+    # TM has a same-named subgenre under nearly every broad genre ("Rock" → "Rock");
+    # an ambiguous name resolves to the broad genre (wider hierarchical net).
+    tm_rows = await db.execute(select(TmGenre).where(TmGenre.name == body.genre))
+    candidates = tm_rows.scalars().all()
+    tm_genre = next((g for g in candidates if g.parent_tm_id is None), None) or (
+        candidates[0] if candidates else None
+    )
     if tm_genre is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
