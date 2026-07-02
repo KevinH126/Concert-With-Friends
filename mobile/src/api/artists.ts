@@ -26,6 +26,17 @@ export async function getMyGenres(): Promise<string[]> {
   return data;
 }
 
+export interface TaxonomyGenre {
+  name: string;
+  subgenres: string[];
+}
+
+// The picker's data (TM taxonomy). POST /genres rejects anything not in it.
+export async function getGenreTaxonomy(): Promise<TaxonomyGenre[]> {
+  const { data } = await api.get('/genres/taxonomy');
+  return data;
+}
+
 export async function addGenre(genre: string): Promise<string[]> {
   const { data } = await api.post('/genres', { genre });
   return data;

@@ -6,6 +6,13 @@ export interface FriendGoing {
   level: 'going' | 'maybe';
 }
 
+// Prediction wording buckets — the API never sends numeric scores.
+export interface FriendPredicted {
+  user_id: string;
+  display_name: string;
+  bucket: 'probably' | 'might';
+}
+
 export interface FeedEvent {
   id: string;
   name: string;
@@ -13,9 +20,11 @@ export interface FeedEvent {
   venue_name: string | null;
   starts_at: string | null;
   genre: string | null;
+  url: string | null;
   my_interest: 'going' | 'maybe' | null;
   my_interest_visibility: 'shared' | 'private' | null;
   friends_going: FriendGoing[];
+  friends_predicted: FriendPredicted[];
 }
 
 export async function getFeed(): Promise<FeedEvent[]> {
