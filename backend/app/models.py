@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    CheckConstraint, Column, DateTime, ForeignKey,
+    Boolean, CheckConstraint, Column, DateTime, ForeignKey,
     Index, SmallInteger, String, Text, UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -52,6 +52,9 @@ class Artist(Base):
     tm_attraction_id = Column(Text, unique=True, nullable=True)
     spotify_id = Column(Text, unique=True, nullable=True)
     name = Column(Text, nullable=False)
+    # P3: touring-scale popularity proxy (TM attraction upcomingEvents count, captured
+    # free during event sync). P6 swaps in Spotify popularity; scorer shape unchanged.
+    tm_upcoming_events = Column(SmallInteger, nullable=True)
 
     user_artists = relationship("UserArtist", back_populates="artist")
     events = relationship("Event", back_populates="artist")
@@ -73,8 +76,22 @@ class UserGenre(Base):
 
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     genre = Column(Text, primary_key=True)
+    # Sub-genre picks are a sharper taste statement and score higher (P3 scorer).
+    is_subgenre = Column(Boolean, nullable=False, default=False, server_default="false")
 
     user = relationship("User", back_populates="genres")
+
+
+class TmGenre(Base):
+    """TM genre taxonomy cache (classifications.json, fetched once via admin sync).
+    Powers the genre picker + hierarchical matching (a user's "Rock" matches rock
+    sub-genres). parent_tm_id NULL = broad genre; set = sub-genre."""
+
+    __tablename__ = "tm_genres"
+
+    tm_id = Column(Text, primary_key=True)
+    name = Column(Text, nullable=False)
+    parent_tm_id = Column(Text, ForeignKey("tm_genres.tm_id"), nullable=True)
 
 
 class Friendship(Base):
@@ -138,6 +155,8 @@ class Event(Base):
     metro_id = Column(Text, nullable=True)
     starts_at = Column(DateTime(timezone=True), nullable=True)
     genre = Column(Text, nullable=True)
+    subgenre = Column(Text, nullable=True)  # P3: TM subGenre (sub-genre match scores higher)
+    url = Column(Text, nullable=True)  # P3: TM event link (compose-sheet share text)
     fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     artist = relationship("Artist", back_populates="events")

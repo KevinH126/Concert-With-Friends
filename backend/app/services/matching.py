@@ -9,7 +9,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Event, EventInterest, UserArtist, UserGenre
+from app.models import Event, EventInterest, TmGenre, UserArtist, UserGenre
 
 
 @dataclass(frozen=True)
@@ -136,6 +136,19 @@ def score(taste: TasteSet, event: EventFacts, ctx: ScoringCtx) -> float:
 
 # user_artists.weight tier boundary: >= this is a favorite, below is liked.
 FAVORITE_WEIGHT_MIN = 2
+
+
+async def load_genre_parents(db: AsyncSession) -> dict[str, str]:
+    """subgenre-name -> parent-genre-name from the tm_genres cache, for ScoringCtx.
+    Empty until POST /admin/sync-genres has run (scorer degrades to exact matches)."""
+    rows = await db.execute(select(TmGenre))
+    genres = rows.scalars().all()
+    names = {g.tm_id: g.name for g in genres}
+    return {
+        g.name: names[g.parent_tm_id]
+        for g in genres
+        if g.parent_tm_id is not None and g.parent_tm_id in names
+    }
 
 
 async def assemble_taste_set(db: AsyncSession, user_id: str, *, friend_visible: bool) -> TasteSet:

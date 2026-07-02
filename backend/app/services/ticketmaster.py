@@ -127,9 +127,14 @@ def parse_tm_event(raw: dict, metro_id: str) -> dict:
     attractions = raw.get("_embedded", {}).get("attractions", [])
     tm_attraction_id = attractions[0]["id"] if attractions else None
     tm_attraction_name = attractions[0].get("name") if attractions else None
+    # Touring-scale popularity proxy, already in the response — zero extra calls.
+    tm_upcoming_events = (
+        attractions[0].get("upcomingEvents", {}).get("_total") if attractions else None
+    )
 
     classifications = raw.get("classifications", [{}])
     genre = classifications[0].get("genre", {}).get("name") if classifications else None
+    subgenre = classifications[0].get("subGenre", {}).get("name") if classifications else None
 
     venue = raw.get("_embedded", {}).get("venues", [{}])[0]
     venue_name = venue.get("name")
@@ -139,11 +144,52 @@ def parse_tm_event(raw: dict, metro_id: str) -> dict:
         "name": raw["name"],
         "tm_attraction_id": tm_attraction_id,
         "tm_attraction_name": tm_attraction_name,
+        "tm_upcoming_events": tm_upcoming_events,
         "venue_name": venue_name,
         "metro_id": metro_id,
         "starts_at": starts_at,
         "genre": genre,
+        "subgenre": subgenre,
+        "url": raw.get("url"),
     }
+
+
+async def fetch_genre_taxonomy() -> list[dict]:
+    """Fetch TM's Music genre taxonomy (classifications.json — one call, cached in
+    tm_genres). Returns flat rows: {tm_id, name, parent_tm_id} where parent_tm_id
+    is None for broad genres and the genre's tm_id for sub-genres.
+    """
+    if not settings.ticketmaster_api_key:
+        logger.warning("No Ticketmaster API key — returning stub genre taxonomy")
+        return _stub_taxonomy()
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await _get_with_backoff(
+            client,
+            f"{_BASE}/classifications.json",
+            params={"apikey": settings.ticketmaster_api_key},
+        )
+        data = resp.json()
+
+    rows: list[dict] = []
+    for classification in data.get("_embedded", {}).get("classifications", []):
+        segment = classification.get("segment", {})
+        if segment.get("name") != "Music":
+            continue
+        for genre in segment.get("_embedded", {}).get("genres", []):
+            rows.append({"tm_id": genre["id"], "name": genre["name"], "parent_tm_id": None})
+            for sub in genre.get("_embedded", {}).get("subgenres", []):
+                rows.append({"tm_id": sub["id"], "name": sub["name"], "parent_tm_id": genre["id"]})
+    return rows
+
+
+def _stub_taxonomy() -> list[dict]:
+    return [
+        {"tm_id": "STUB_G_ROCK", "name": "Rock", "parent_tm_id": None},
+        {"tm_id": "STUB_SG_INDIE", "name": "Indie Rock", "parent_tm_id": "STUB_G_ROCK"},
+        {"tm_id": "STUB_SG_HARDCORE", "name": "Hardcore", "parent_tm_id": "STUB_G_ROCK"},
+        {"tm_id": "STUB_G_JAZZ", "name": "Jazz", "parent_tm_id": None},
+    ]
 
 
 async def _get_with_backoff(
@@ -170,12 +216,17 @@ def _stub_events(metro_id: str) -> list[dict]:
         {
             "id": "STUB_EVT_001",
             "name": "Radiohead Live",
+            "url": "https://stub.ticketmaster.test/radiohead-live",
             "dates": {"start": {"dateTime": "2026-08-15T20:00:00Z"}},
             "_embedded": {
-                "attractions": [{"id": "STUB_ATT_RADIOHEAD", "name": "Radiohead"}],
+                "attractions": [{
+                    "id": "STUB_ATT_RADIOHEAD",
+                    "name": "Radiohead",
+                    "upcomingEvents": {"_total": 23},
+                }],
                 "venues": [{"name": "Stub Arena"}],
             },
-            "classifications": [{"genre": {"name": "Rock"}}],
+            "classifications": [{"genre": {"name": "Rock"}, "subGenre": {"name": "Alternative Rock"}}],
         },
         {
             "id": "STUB_EVT_002",

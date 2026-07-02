@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import AsyncSessionLocal
-from app.models import Artist, Event
-from app.services.ticketmaster import fetch_events_for_metro, parse_tm_event
+from app.models import Artist, Event, TmGenre
+from app.services.ticketmaster import fetch_events_for_metro, fetch_genre_taxonomy, parse_tm_event
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ async def sync_metro(metro_id: str, session_factory=None) -> int:
             artist_id = None
             tm_att_id = parsed.pop("tm_attraction_id", None)
             tm_att_name = parsed.pop("tm_attraction_name", None)
+            tm_upcoming = parsed.pop("tm_upcoming_events", None)
             if tm_att_id:
                 result = await db.execute(select(Artist).where(Artist.tm_attraction_id == tm_att_id))
                 artist = result.scalar_one_or_none()
@@ -41,6 +42,8 @@ async def sync_metro(metro_id: str, session_factory=None) -> int:
                     artist = Artist(tm_attraction_id=tm_att_id, name=tm_att_name or parsed["name"])
                     db.add(artist)
                     await db.flush()
+                if tm_upcoming is not None:
+                    artist.tm_upcoming_events = tm_upcoming
                 artist_id = artist.id
 
             # Upsert event (keyed by tm_event_id)
@@ -54,6 +57,8 @@ async def sync_metro(metro_id: str, session_factory=None) -> int:
                     metro_id=parsed["metro_id"],
                     starts_at=parsed["starts_at"],
                     genre=parsed["genre"],
+                    subgenre=parsed["subgenre"],
+                    url=parsed["url"],
                 )
                 .on_conflict_do_update(
                     index_elements=["tm_event_id"],
@@ -63,6 +68,8 @@ async def sync_metro(metro_id: str, session_factory=None) -> int:
                         "venue_name": parsed["venue_name"],
                         "starts_at": parsed["starts_at"],
                         "genre": parsed["genre"],
+                        "subgenre": parsed["subgenre"],
+                        "url": parsed["url"],
                     },
                 )
             )
@@ -72,3 +79,27 @@ async def sync_metro(metro_id: str, session_factory=None) -> int:
         await db.commit()
 
     return count
+
+
+async def sync_genres(session_factory=None) -> int:
+    """Load TM's Music genre taxonomy into tm_genres (idempotent upsert).
+    Fetched once in practice; safe to re-run. Returns rows processed."""
+    factory = session_factory or AsyncSessionLocal
+    rows = await fetch_genre_taxonomy()
+
+    async with factory() as db:
+        # Parents first so the self-referencing FK is always satisfiable.
+        for row in sorted(rows, key=lambda r: r["parent_tm_id"] is not None):
+            stmt = (
+                pg_insert(TmGenre)
+                .values(**row)
+                .on_conflict_do_update(
+                    index_elements=["tm_id"],
+                    set_={"name": row["name"], "parent_tm_id": row["parent_tm_id"]},
+                )
+            )
+            await db.execute(stmt)
+        await db.commit()
+
+    logger.info("Synced %d TM genre taxonomy rows", len(rows))
+    return len(rows)

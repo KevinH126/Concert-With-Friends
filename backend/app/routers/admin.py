@@ -5,7 +5,7 @@ Protected by a simple static token from the env for now.
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.config import settings
-from app.services.event_sync import sync_metro
+from app.services.event_sync import sync_genres, sync_metro
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -19,3 +19,9 @@ def _require_admin(x_admin_token: str = Header(...)):
 async def trigger_sync(metro_id: str):
     count = await sync_metro(metro_id)
     return {"metro_id": metro_id, "events_upserted": count}
+
+
+@router.post("/sync-genres", dependencies=[Depends(_require_admin)])
+async def trigger_genre_sync():
+    count = await sync_genres()
+    return {"genres_upserted": count}
