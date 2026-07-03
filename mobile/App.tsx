@@ -10,6 +10,7 @@ import TasteScreen from './src/screens/TasteScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import FriendsScreen from './src/screens/FriendsScreen';
 import FriendProfileScreen from './src/screens/FriendProfileScreen';
+import MyShowsScreen from './src/screens/MyShowsScreen';
 
 const Stack = createNativeStackNavigator();
 const FriendsStackNav = createNativeStackNavigator();
@@ -36,6 +37,7 @@ function MainTabs() {
   return (
     <Tab.Navigator screenOptions={{ headerShown: true }}>
       <Tab.Screen name="Feed" component={FeedScreen} />
+      <Tab.Screen name="My Shows" component={MyShowsScreen} />
       <Tab.Screen name="Friends" component={FriendsStack} options={{ headerShown: false }} />
       <Tab.Screen name="Taste" component={TasteScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />

@@ -193,6 +193,52 @@ async def get_feed(
     ]
 
 
+class MyInterestResponse(BaseModel):
+    id: str
+    name: str
+    artist_name: str | None
+    venue_name: str | None
+    starts_at: datetime | None
+    genre: str | None
+    url: str | None
+    level: str  # 'going' | 'maybe'
+    visibility: str  # 'shared' | 'private'
+    is_past: bool
+
+
+@router.get("/interests", response_model=list[MyInterestResponse])
+async def my_interests(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every show you've marked, including past ones — the system of record for
+    your plans. The feed only shows upcoming events, so without this a mark on a
+    past show would be invisible yet still feed your taste history."""
+    rows = await db.execute(
+        select(EventInterest, Event)
+        .join(Event, Event.id == EventInterest.event_id)
+        .options(selectinload(Event.artist))
+        .where(EventInterest.user_id == current_user.id)
+        .order_by(Event.starts_at.desc())
+    )
+    now = datetime.now(timezone.utc)
+    return [
+        MyInterestResponse(
+            id=e.id,
+            name=e.name,
+            artist_name=e.artist.name if e.artist else None,
+            venue_name=e.venue_name,
+            starts_at=e.starts_at,
+            genre=e.genre,
+            url=e.url,
+            level=interest.level,
+            visibility=interest.visibility,
+            is_past=e.starts_at is not None and e.starts_at < now,
+        )
+        for interest, e in rows.all()
+    ]
+
+
 class SetInterestRequest(BaseModel):
     level: str  # 'going' | 'maybe'
     # 'private' feeds your own feed/notifications but is invisible to friends.

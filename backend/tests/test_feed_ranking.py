@@ -113,6 +113,31 @@ class TestSocialPullIn:
         assert events[event_id]["my_interest"] == "going"
 
 
+class TestMyInterests:
+    async def test_lists_all_marks_including_past_and_private(self, client, db_session):
+        """The feed only shows upcoming events; /feed/interests is the system of
+        record — a past private mark must still be listed (and removable)."""
+        me, my_headers = await create_user(client, "myshowsuser")
+        _, upcoming = await make_artist_event(db_session, genre="Rock", days_ahead=10)
+        _, past = await make_artist_event(db_session, genre="Rock", days_ahead=-2)
+        await mark(db_session, me, upcoming, level="maybe", visibility="shared")
+        await mark(db_session, me, past, level="going", visibility="private")
+
+        resp = await client.get("/feed/interests", headers=my_headers)
+        assert resp.status_code == 200
+        by_id = {e["id"]: e for e in resp.json()}
+        assert by_id[upcoming]["level"] == "maybe" and by_id[upcoming]["is_past"] is False
+        assert by_id[past]["level"] == "going" and by_id[past]["visibility"] == "private"
+        assert by_id[past]["is_past"] is True
+
+        # Unmarking a PAST event must work — it's invisible in the feed but
+        # still feeds taste history until removed.
+        resp = await client.delete(f"/feed/events/{past}/interest", headers=my_headers)
+        assert resp.status_code == 204
+        resp = await client.get("/feed/interests", headers=my_headers)
+        assert past not in {e["id"] for e in resp.json()}
+
+
 class TestFriendPredictions:
     async def test_friend_with_favorite_artist_predicted_probably(self, client, db_session):
         me, my_headers = await create_user(client, "predme")

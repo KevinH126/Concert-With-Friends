@@ -32,6 +32,25 @@ export async function getFeed(): Promise<FeedEvent[]> {
   return data;
 }
 
+// Every show you've marked, past ones included — the feed only shows upcoming.
+export interface MyInterest {
+  id: string;
+  name: string;
+  artist_name: string | null;
+  venue_name: string | null;
+  starts_at: string | null;
+  genre: string | null;
+  url: string | null;
+  level: 'going' | 'maybe';
+  visibility: 'shared' | 'private';
+  is_past: boolean;
+}
+
+export async function getMyInterests(): Promise<MyInterest[]> {
+  const { data } = await api.get('/feed/interests');
+  return data;
+}
+
 export async function setInterest(
   eventId: string,
   level: 'going' | 'maybe',
