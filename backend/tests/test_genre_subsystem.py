@@ -99,6 +99,22 @@ class TestGenrePicker:
         taxonomy = {g["name"]: g["subgenres"] for g in resp.json()}
         assert taxonomy["Rock"] == ["Indie Rock"]  # the duplicate "Rock" sub is noise
 
+    async def test_remove_genre_with_slash_in_name(self, client, db_session):
+        """TM names like 'Dance/Electronic' must survive the DELETE route.
+        (Reported: 'could not remove genre' — the encoded slash 404'd.)"""
+        db_session.add(TmGenre(tm_id="G_DANCE", name="Dance/Electronic", parent_tm_id=None))
+        await db_session.commit()
+        _, headers = await create_user(client, "slashuser")
+
+        resp = await client.post("/genres", json={"genre": "Dance/Electronic"}, headers=headers)
+        assert resp.status_code == 201
+
+        resp = await client.delete("/genres/Dance%2FElectronic", headers=headers)
+        assert resp.status_code == 204
+
+        resp = await client.get("/genres", headers=headers)
+        assert resp.json() == []
+
     async def test_free_text_genre_is_rejected(self, client, db_session):
         await seed_taxonomy(db_session)
         _, headers = await create_user(client, "freetextuser")

@@ -88,6 +88,20 @@ class TestSocialPullIn:
         resp = await client.get("/feed", headers=my_headers)
         assert event_id not in {e["id"] for e in resp.json()}
 
+    async def test_history_genre_ranks_but_never_includes(self, client, db_session):
+        """One maybe-mark on a rock show must not subscribe you to every rock
+        concert in the metro: history genres are a ranking signal, not an
+        inclusion license. (Reported: removing 'Rock' left rock shows in feed.)"""
+        me, my_headers = await create_user(client, "historyonly")
+        _, marked_event = await make_artist_event(db_session, genre="Rock")
+        await mark(db_session, me, marked_event, level="maybe")
+        _, other_rock_event = await make_artist_event(db_session, genre="Rock")
+
+        resp = await client.get("/feed", headers=my_headers)
+        ids = {e["id"] for e in resp.json()}
+        assert marked_event in ids       # my own mark keeps it
+        assert other_rock_event not in ids  # genre history alone doesn't include
+
     async def test_own_mark_keeps_non_matching_event_in_feed(self, client, db_session):
         me, my_headers = await create_user(client, "ownmark")
         _, event_id = await make_artist_event(db_session, genre="Country")

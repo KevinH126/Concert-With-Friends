@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -87,6 +88,10 @@ async def get_feed(
     event_ids = [e.id for e in events]
 
     my_taste = await assemble_taste_set(db, current_user.id, friend_visible=False)
+    # History genres RANK matches but never INCLUDE them: one maybe-mark on a rock
+    # show must not subscribe you to every rock concert in the metro. History
+    # artists stay — a band you marked is a high-confidence signal for its shows.
+    inclusion_taste = replace(my_taste, history_genres=frozenset())
     genre_parents = await load_genre_parents(db)
 
     # My interests for these events
@@ -144,9 +149,9 @@ async def get_feed(
             friends_maybe=sum(1 for f in strip if f.level == "maybe"),
             own_interest=interests[e.id].level if e.id in interests else None,
         )
-        my_score = score(my_taste, facts, my_ctx)
-        if my_score <= 0:
+        if score(inclusion_taste, facts, my_ctx) <= 0:
             continue  # inclusion = taste match OR friend interest OR own mark — all live in the score
+        my_score = score(my_taste, facts, my_ctx)  # full taste (incl. history genres) ranks
         scored.append((my_score, e))
 
         for fid, f_taste in friend_tastes.items():

@@ -90,7 +90,9 @@ async def add_genre(
     return [row[0] for row in result.all()]
 
 
-@router.delete("/{genre}", status_code=status.HTTP_204_NO_CONTENT)
+# :path converter — TM genre names contain slashes ("Dance/Electronic", "Hip-Hop/Rap")
+# and a plain {genre} segment 404s on the encoded slash.
+@router.delete("/{genre:path}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_genre(
     genre: str,
     current_user: User = Depends(get_current_user),

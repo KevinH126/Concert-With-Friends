@@ -446,7 +446,7 @@ Replaces the P3 compose-sheet hand-off button with a real system.
 | **Popularity (P3)** | TM attraction `upcomingEvents` count stored on `artists` at sync = proxy popularity term; **Spotify popularity swaps in at P6**, scorer shape unchanged. |
 | **Taste-set (P3)** | Assembled **in-memory** from `user_artists`+`user_genres`+**interest history** (each mark feeds the event's artist+genre at implicit weight; going > maybe, both below explicit favorites). **Two variants:** friend-visible predictions = explicit picks + shared marks only; own feed = everything incl. private. No `user_taste_artists` until P6, and then **imported Spotify rows only** (no dual-write of explicit picks). |
 | **Match display (P3)** | One strip: marked-going > marked-maybe > predicted. Two wording buckets ("would probably go" / "might be into this"); **no numeric scores or meters**. Symmetric; private interest never friend-visible. |
-| **Social pull-in (P3)** | Feed inclusion = taste match **OR** ≥1 friend w/ shared going/maybe. |
+| **Social pull-in (P3)** | Feed inclusion = taste match **OR** ≥1 friend w/ shared going/maybe. Refined 2026-07-03: **history genres rank but never include** (one maybe-mark must not subscribe you to a whole genre); history *artists* still include. |
 | **Event search (P3)** | `GET /events/search` over **cached metro events** + feed search bar. Never live TM (typeahead stays the only per-user TM call). |
 | **Compose sheet (P3)** | Trigger = **≥1 friend** with shared *marked* interest; predicted friends = suggested invitees only. Share text carries the TM link (`events.url`). |
 | **Location** | Single `home_metro_id`. Geolocation → nearest DMA **once** at onboarding, then discarded; editable via picker. |

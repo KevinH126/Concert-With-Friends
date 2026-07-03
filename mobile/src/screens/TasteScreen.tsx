@@ -9,11 +9,12 @@ import {
 } from '../api/artists';
 
 // Genres come from the TM taxonomy picker only — the API rejects free text.
-function GenrePickerModal({ visible, onClose, myGenres, onPick }: {
+// Tapping toggles: unpicked adds, picked (✓) removes.
+function GenrePickerModal({ visible, onClose, myGenres, onToggle }: {
   visible: boolean;
   onClose: () => void;
   myGenres: string[];
-  onPick: (genre: string) => void;
+  onToggle: (genre: string) => void;
 }) {
   const [taxonomy, setTaxonomy] = useState<TaxonomyGenre[] | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -60,8 +61,7 @@ function GenrePickerModal({ visible, onClose, myGenres, onPick }: {
               <View style={pickerStyles.genreRow}>
                 <TouchableOpacity
                   style={pickerStyles.genreName}
-                  onPress={() => onPick(section.title)}
-                  disabled={picked(section.title)}
+                  onPress={() => onToggle(section.title)}
                 >
                   <Text style={[pickerStyles.genreText, picked(section.title) && pickerStyles.pickedText]}>
                     {section.title}{picked(section.title) ? ' ✓' : ''}
@@ -77,8 +77,7 @@ function GenrePickerModal({ visible, onClose, myGenres, onPick }: {
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={pickerStyles.subgenreRow}
-                onPress={() => onPick(item)}
-                disabled={picked(item)}
+                onPress={() => onToggle(item)}
               >
                 <Text style={[pickerStyles.subgenreText, picked(item) && pickerStyles.pickedText]}>
                   {item}{picked(item) ? ' ✓' : ''}
@@ -132,12 +131,17 @@ export default function TasteScreen() {
     }
   };
 
-  const handlePickGenre = async (genre: string) => {
+  const handleToggleGenre = async (genre: string) => {
     try {
-      const updated = await addGenre(genre);
-      setGenres(updated);
+      if (genres.includes(genre)) {
+        await removeGenre(genre);
+        setGenres((prev) => prev.filter((g) => g !== genre));
+      } else {
+        const updated = await addGenre(genre);
+        setGenres(updated);
+      }
     } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not add genre');
+      Alert.alert('Error', e?.response?.data?.detail ?? 'Could not update genre');
     }
   };
 
@@ -207,7 +211,7 @@ export default function TasteScreen() {
         visible={pickerOpen}
         onClose={() => setPickerOpen(false)}
         myGenres={genres}
-        onPick={handlePickGenre}
+        onToggle={handleToggleGenre}
       />
     </>
   );
