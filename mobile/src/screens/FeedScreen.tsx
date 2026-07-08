@@ -25,13 +25,21 @@ function friendsGoingText(fg: FriendGoing[]): string {
   return `👥 ${parts.join(' · ')}`;
 }
 
-function predictedText(fp: FriendPredicted[]): string {
-  const probably = fp.filter((f) => f.bucket === 'probably').map((f) => f.display_name);
-  const might = fp.filter((f) => f.bucket === 'might').map((f) => f.display_name);
-  const parts: string[] = [];
-  if (probably.length) parts.push(`${joinNames(probably)} would probably go`);
-  if (might.length) parts.push(`${joinNames(might)} might be into this`);
-  return `✨ ${parts.join(' · ')}`;
+// One line per predicted friend, naming *why* (the strongest taste signal) rather
+// than hedging with "probably" vs "might". Artist reasons reuse the card's own
+// artist name; genre reasons carry the matched genre from the API.
+function predictionLine(fp: FriendPredicted, artistName: string | null): string {
+  const who = fp.display_name;
+  if (fp.reason_kind === 'favorite_artist' && artistName) {
+    return `🎯 ${artistName} is one of ${who}'s favorites`;
+  }
+  if (fp.reason_kind === 'artist' && artistName) {
+    return `✨ ${who} is into ${artistName}`;
+  }
+  if (fp.reason_kind === 'genre' && fp.reason_genre) {
+    return `✨ Matches ${who}'s taste in ${fp.reason_genre}`;
+  }
+  return `✨ ${who} might be into this`; // fallback if a reason field is missing
 }
 
 // Show the most specific label available: "Rock · Alternative Rock" when the event
@@ -263,9 +271,14 @@ export default function FeedScreen() {
               {item.friends_going.length > 0 && (
                 <Text style={styles.friendsStrip}>{friendsGoingText(item.friends_going)}</Text>
               )}
-              {item.friends_predicted.length > 0 && (
-                <Text style={styles.predictedStrip}>{predictedText(item.friends_predicted)}</Text>
-              )}
+              {item.friends_predicted.map((fp) => (
+                <Text
+                  key={fp.user_id}
+                  style={[styles.predictedStrip, fp.bucket === 'probably' && styles.predictedStrong]}
+                >
+                  {predictionLine(fp, item.artist_name)}
+                </Text>
+              ))}
               <View style={styles.actions}>
                 <TouchableOpacity
                   style={[styles.interestBtn, item.my_interest === 'going' && styles.activeGoing]}
@@ -325,6 +338,7 @@ const styles = StyleSheet.create({
   },
   friendsStrip: { fontSize: 13, color: '#00695C', marginTop: 8, fontWeight: '500' },
   predictedStrip: { fontSize: 13, color: '#7B1FA2', marginTop: 4, fontWeight: '500' },
+  predictedStrong: { color: '#4A148C', fontWeight: '700' },
   actions: { flexDirection: 'row', gap: 8, marginTop: 12 },
   hint: { fontSize: 11, color: '#aaa', marginTop: 6, textAlign: 'center' },
   interestBtn: {

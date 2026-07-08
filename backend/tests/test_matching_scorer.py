@@ -10,6 +10,7 @@ from app.services.matching import (
     EventFacts,
     ScoringCtx,
     TasteSet,
+    explain_match,
     prediction_bucket,
     score,
 )
@@ -217,6 +218,42 @@ class TestReservedTravelSlot:
         # it must not move a score — this test is deleted when travel goes live.
         fan = taste(favorite_artist_ids=frozenset({"artist-1"}))
         assert score(fan, event(), ctx(in_range=True)) == score(fan, event(), ctx(in_range=False))
+
+
+class TestExplainMatch:
+    """The prediction strip names the strongest taste signal. explain_match must
+    always agree with score()'s tiering — it reports the largest base term."""
+
+    TREE = {"Indie Rock": "Rock", "Hard Rock": "Rock"}
+
+    def test_favorite_artist_is_the_reason(self):
+        r = explain_match(taste(favorite_artist_ids=frozenset({"artist-1"})), event(), ctx())
+        assert r.kind == "favorite_artist" and r.genre is None
+
+    def test_liked_and_history_artist_report_generic_artist(self):
+        liked = explain_match(taste(liked_artist_ids=frozenset({"artist-1"})), event(), ctx())
+        hist = explain_match(taste(history_going_artist_ids=frozenset({"artist-1"})), event(), ctx())
+        assert liked.kind == "artist" and hist.kind == "artist"
+
+    def test_genre_reason_carries_the_matched_name(self):
+        r = explain_match(
+            taste(genres=frozenset({"Indie Rock"})),
+            event(genre="Rock", subgenre="Indie Rock"),
+            ctx(genre_parents=self.TREE),
+        )
+        assert r.kind == "genre" and r.genre == "Indie Rock"
+
+    def test_stronger_artist_signal_wins_over_genre(self):
+        # Favorite artist AND a genre match on the same show → artist is the reason.
+        r = explain_match(
+            taste(favorite_artist_ids=frozenset({"artist-1"}), genres=frozenset({"Rock"})),
+            event(genre="Rock"),
+            ctx(),
+        )
+        assert r.kind == "favorite_artist"
+
+    def test_no_taste_overlap_has_no_reason(self):
+        assert explain_match(taste(), event(genre="Rock"), ctx()) is None
 
 
 class TestPredictionBuckets:

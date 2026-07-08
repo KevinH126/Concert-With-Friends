@@ -15,6 +15,7 @@ from app.services.matching import (
     EventFacts,
     ScoringCtx,
     assemble_taste_set,
+    explain_match,
     load_genre_parents,
     prediction_bucket,
     score,
@@ -32,7 +33,11 @@ class FriendGoing(BaseModel):
 class FriendPredicted(BaseModel):
     user_id: str
     display_name: str
-    bucket: str  # 'probably' ("would probably go") | 'might' ("might be into this")
+    bucket: str  # 'probably' | 'might' — drives the strip's icon/emphasis
+    # Why we predicted them, so the client can name it ("<artist> is one of
+    # <name>'s favorites") instead of a vague hedge. See matching.MatchReason.
+    reason_kind: str  # 'favorite_artist' | 'artist' | 'genre'
+    reason_genre: str | None = None  # matched genre name when reason_kind == 'genre'
 
 
 class EventResponse(BaseModel):
@@ -160,11 +165,16 @@ async def get_feed(
                 continue  # already on the strip as a real mark — never double-listed
             bucket = prediction_bucket(score(f_taste, facts, taste_only_ctx))
             if bucket is not None:
+                reason = explain_match(f_taste, facts, taste_only_ctx)
                 predictions.setdefault(e.id, []).append(
                     FriendPredicted(
                         user_id=fid,
                         display_name=friend_users[fid].display_name,
                         bucket=bucket,
+                        # bucket is not None ⇒ base taste term > 0 ⇒ a reason exists;
+                        # the 'genre' fallback is belt-and-suspenders only.
+                        reason_kind=reason.kind if reason else "genre",
+                        reason_genre=reason.genre if reason else None,
                     )
                 )
 

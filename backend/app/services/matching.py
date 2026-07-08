@@ -41,6 +41,19 @@ class ScoringCtx:
     in_range: bool = True  # reserved travel slot — constant no-op in P3
 
 
+@dataclass(frozen=True)
+class MatchReason:
+    """The single strongest taste signal behind a match — what the UI names on the
+    prediction strip. `kind` drives the client copy + icon:
+      'favorite_artist' — the event's artist is one of their favorites (strong),
+      'artist'          — a liked artist or one revealed by their mark history,
+      'genre'           — any genre/sub-genre/sibling/history-genre match.
+    `genre` carries the matched genre name for kind == 'genre'; None for artists
+    (the client already has the event's artist name)."""
+    kind: str
+    genre: str | None = None
+
+
 # Artist tiers: explicit picks beat revealed history; a committed mark beats a hesitant one.
 W_ARTIST_FAVORITE = 100.0
 W_ARTIST_LIKED = 60.0
@@ -80,30 +93,39 @@ BUCKET_PROBABLY_MIN = 80.0
 BUCKET_MIGHT_MIN = 25.0
 
 
-def _artist_term(taste: TasteSet, event: EventFacts) -> float:
+# The reason helpers are the single source of truth for the taste tiers: each
+# returns (weight, reason) for its strongest match, and the _term wrappers below
+# expose just the weight to score(). This keeps ranking and explanation in lockstep.
+def _artist_reason(taste: TasteSet, event: EventFacts) -> tuple[float, MatchReason] | None:
     if event.artist_id is None:
-        return 0.0
+        return None
     if event.artist_id in taste.favorite_artist_ids:
-        return W_ARTIST_FAVORITE
+        return W_ARTIST_FAVORITE, MatchReason("favorite_artist")
     if event.artist_id in taste.liked_artist_ids:
-        return W_ARTIST_LIKED
+        return W_ARTIST_LIKED, MatchReason("artist")
     if event.artist_id in taste.history_going_artist_ids:
-        return W_ARTIST_HISTORY_GOING
+        return W_ARTIST_HISTORY_GOING, MatchReason("artist")
     if event.artist_id in taste.history_maybe_artist_ids:
-        return W_ARTIST_HISTORY_MAYBE
-    return 0.0
+        return W_ARTIST_HISTORY_MAYBE, MatchReason("artist")
+    return None
 
 
-def _genre_term(taste: TasteSet, event: EventFacts, ctx: ScoringCtx) -> float:
-    best = 0.0
+def _genre_reason(taste: TasteSet, event: EventFacts, ctx: ScoringCtx) -> tuple[float, MatchReason] | None:
+    best: tuple[float, MatchReason] | None = None
+
+    def consider(weight: float, name: str) -> None:
+        nonlocal best
+        if best is None or weight > best[0]:
+            best = (weight, MatchReason("genre", name))
+
     event_parent = ctx.genre_parents.get(event.subgenre) if event.subgenre is not None else None
     if event.subgenre is not None:
         if event.subgenre in taste.genres:
-            best = max(best, W_GENRE_SUBGENRE)
-        if event_parent in taste.genres:
-            best = max(best, W_GENRE_BROAD)
+            consider(W_GENRE_SUBGENRE, event.subgenre)
+        if event_parent is not None and event_parent in taste.genres:
+            consider(W_GENRE_BROAD, event_parent)
     if event.genre is not None and event.genre in taste.genres:
-        best = max(best, W_GENRE_BROAD)
+        consider(W_GENRE_BROAD, event.genre)
 
     # Sibling reach: a picked sub-genre also surfaces other shows under the same
     # broad genre. The event's broad genre is its own `genre` and/or its sub-genre's
@@ -111,14 +133,36 @@ def _genre_term(taste: TasteSet, event: EventFacts, ctx: ScoringCtx) -> float:
     event_broad = {g for g in (event.genre, event_parent) if g is not None}
     if event_broad:
         for picked in taste.genres:
-            if ctx.genre_parents.get(picked) in event_broad:
-                best = max(best, W_GENRE_SUBGENRE_SIBLING)
+            parent = ctx.genre_parents.get(picked)
+            if parent in event_broad:
+                consider(W_GENRE_SUBGENRE_SIBLING, parent)
                 break
 
     for name in (event.genre, event.subgenre):
         if name is not None and name in taste.history_genres:
-            best = max(best, W_GENRE_HISTORY)
+            consider(W_GENRE_HISTORY, name)
     return best
+
+
+def _artist_term(taste: TasteSet, event: EventFacts) -> float:
+    r = _artist_reason(taste, event)
+    return r[0] if r else 0.0
+
+
+def _genre_term(taste: TasteSet, event: EventFacts, ctx: ScoringCtx) -> float:
+    r = _genre_reason(taste, event, ctx)
+    return r[0] if r else 0.0
+
+
+def explain_match(taste: TasteSet, event: EventFacts, ctx: ScoringCtx) -> MatchReason | None:
+    """The dominant taste signal behind the match — the single largest base term,
+    mirroring score()'s tiering. None when nothing in taste matches (base == 0)."""
+    candidates = [
+        r for r in (_artist_reason(taste, event), _genre_reason(taste, event, ctx)) if r is not None
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda pair: pair[0])[1]
 
 
 def _popularity_term(event: EventFacts) -> float:

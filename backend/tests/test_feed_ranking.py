@@ -150,7 +150,10 @@ class TestFriendPredictions:
         resp = await client.get("/feed", headers=my_headers)
         events = {e["id"]: e for e in resp.json()}
         predicted = events[event_id]["friends_predicted"]
-        assert predicted == [{"user_id": friend, "display_name": "Predfriend", "bucket": "probably"}]
+        assert predicted == [{
+            "user_id": friend, "display_name": "Predfriend", "bucket": "probably",
+            "reason_kind": "favorite_artist", "reason_genre": None,
+        }]
 
     async def test_marked_friend_never_double_listed_as_predicted(self, client, db_session):
         me, my_headers = await create_user(client, "dblme")

@@ -6,11 +6,15 @@ export interface FriendGoing {
   level: 'going' | 'maybe';
 }
 
-// Prediction wording buckets — the API never sends numeric scores.
+// Predictions name their reason (never a number). bucket drives icon/emphasis;
+// reason_kind + reason_genre drive the wording. For artist reasons the client
+// uses the event's own artist_name, so only the genre name rides along.
 export interface FriendPredicted {
   user_id: string;
   display_name: string;
   bucket: 'probably' | 'might';
+  reason_kind: 'favorite_artist' | 'artist' | 'genre';
+  reason_genre: string | null;
 }
 
 export interface FeedEvent {
