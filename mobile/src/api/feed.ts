@@ -20,6 +20,7 @@ export interface FeedEvent {
   venue_name: string | null;
   starts_at: string | null;
   genre: string | null;
+  subgenre: string | null;
   url: string | null;
   my_interest: 'going' | 'maybe' | null;
   my_interest_visibility: 'shared' | 'private' | null;

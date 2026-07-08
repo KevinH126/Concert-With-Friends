@@ -34,6 +34,13 @@ function predictedText(fp: FriendPredicted[]): string {
   return `✨ ${parts.join(' · ')}`;
 }
 
+// Show the most specific label available: "Rock · Alternative Rock" when the event
+// carries a sub-genre, falling back to whichever of the two exists on its own.
+function genreLabel(genre: string | null, subgenre: string | null): string | null {
+  if (genre && subgenre && genre !== subgenre) return `${genre} · ${subgenre}`;
+  return subgenre ?? genre ?? null;
+}
+
 function formatDate(iso: string | null): string | null {
   if (!iso) return null;
   return new Date(iso).toLocaleDateString(undefined, {
@@ -250,7 +257,9 @@ export default function FeedScreen() {
               {item.artist_name && <Text style={styles.meta}>{item.artist_name}</Text>}
               {item.venue_name && <Text style={styles.meta}>{item.venue_name}</Text>}
               {item.starts_at && <Text style={styles.date}>{formatDate(item.starts_at)}</Text>}
-              {item.genre && <Text style={styles.genre}>{item.genre}</Text>}
+              {genreLabel(item.genre, item.subgenre) && (
+                <Text style={styles.genre}>{genreLabel(item.genre, item.subgenre)}</Text>
+              )}
               {item.friends_going.length > 0 && (
                 <Text style={styles.friendsStrip}>{friendsGoingText(item.friends_going)}</Text>
               )}

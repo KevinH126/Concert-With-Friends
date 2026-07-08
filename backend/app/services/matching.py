@@ -51,6 +51,10 @@ W_ARTIST_HISTORY_MAYBE = 20.0
 # A broad pick still matches any of its sub-genres (hierarchical, via ctx.genre_parents).
 W_GENRE_SUBGENRE = 30.0
 W_GENRE_BROAD = 18.0
+# A picked sub-genre also surfaces its siblings (other sub-genres of the same broad
+# genre), but weaker than an exact hit and weaker than picking the broad genre
+# outright — a narrower pick must not out-pull the same show for a broad-genre fan.
+W_GENRE_SUBGENRE_SIBLING = 12.0
 W_GENRE_HISTORY = 10.0  # genre inferred from marks — implicit, below any explicit pick
 
 # Popularity (TM upcomingEvents proxy; Spotify swaps in at P6): a bounded tiebreaker
@@ -92,13 +96,25 @@ def _artist_term(taste: TasteSet, event: EventFacts) -> float:
 
 def _genre_term(taste: TasteSet, event: EventFacts, ctx: ScoringCtx) -> float:
     best = 0.0
+    event_parent = ctx.genre_parents.get(event.subgenre) if event.subgenre is not None else None
     if event.subgenre is not None:
         if event.subgenre in taste.genres:
             best = max(best, W_GENRE_SUBGENRE)
-        if ctx.genre_parents.get(event.subgenre) in taste.genres:
+        if event_parent in taste.genres:
             best = max(best, W_GENRE_BROAD)
     if event.genre is not None and event.genre in taste.genres:
         best = max(best, W_GENRE_BROAD)
+
+    # Sibling reach: a picked sub-genre also surfaces other shows under the same
+    # broad genre. The event's broad genre is its own `genre` and/or its sub-genre's
+    # parent; any picked sub-genre sharing that parent is a (weaker) sibling match.
+    event_broad = {g for g in (event.genre, event_parent) if g is not None}
+    if event_broad:
+        for picked in taste.genres:
+            if ctx.genre_parents.get(picked) in event_broad:
+                best = max(best, W_GENRE_SUBGENRE_SIBLING)
+                break
+
     for name in (event.genre, event.subgenre):
         if name is not None and name in taste.history_genres:
             best = max(best, W_GENRE_HISTORY)

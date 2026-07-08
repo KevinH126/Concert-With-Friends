@@ -42,6 +42,7 @@ class EventResponse(BaseModel):
     venue_name: str | None
     starts_at: datetime | None
     genre: str | None
+    subgenre: str | None
     url: str | None
     my_interest: str | None  # 'going' | 'maybe' | None
     my_interest_visibility: str | None  # 'shared' | 'private' | None
@@ -181,6 +182,7 @@ async def get_feed(
             venue_name=e.venue_name,
             starts_at=e.starts_at,
             genre=e.genre,
+            subgenre=e.subgenre,
             url=e.url,
             my_interest=interests[e.id].level if e.id in interests else None,
             my_interest_visibility=interests[e.id].visibility if e.id in interests else None,

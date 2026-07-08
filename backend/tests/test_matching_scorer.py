@@ -93,6 +93,32 @@ class TestGenreHierarchy:
         rock_event = event(genre="Rock", subgenre="Indie Rock")
         assert score(country_fan, rock_event, ctx(genre_parents=self.ROCK_TREE)) == 0
 
+    SIBLING_TREE = {"Indie Rock": "Rock", "Hard Rock": "Rock"}
+
+    def test_subgenre_pick_surfaces_sibling_below_exact_hit(self):
+        # Picking "Indie Rock" also surfaces a sibling "Hard Rock" show — but the
+        # exact-subgenre hit must still outrank the sibling, and the sibling scores.
+        indie_fan = taste(genres=frozenset({"Indie Rock"}))
+        exact = event(genre="Rock", subgenre="Indie Rock")
+        sibling = event(genre="Rock", subgenre="Hard Rock")
+        exact_s = score(indie_fan, exact, ctx(genre_parents=self.SIBLING_TREE))
+        sibling_s = score(indie_fan, sibling, ctx(genre_parents=self.SIBLING_TREE))
+        assert exact_s > sibling_s > 0
+
+    def test_subgenre_sibling_scores_below_broad_pick(self):
+        # A Hard Rock show should score no higher for an Indie-Rock picker (sibling
+        # reach) than for someone who picked the whole "Rock" broad genre.
+        sibling_event = event(genre="Rock", subgenre="Hard Rock")
+        indie = score(
+            taste(genres=frozenset({"Indie Rock"})), sibling_event,
+            ctx(genre_parents=self.SIBLING_TREE),
+        )
+        broad = score(
+            taste(genres=frozenset({"Rock"})), sibling_event,
+            ctx(genre_parents=self.SIBLING_TREE),
+        )
+        assert broad > indie > 0
+
 
 class TestInterestHistoryTiers:
     """Revealed preference: marks teach the scorer, at implicit weight.
