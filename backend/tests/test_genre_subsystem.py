@@ -28,11 +28,17 @@ class TestParseTmEvent:
                 "venues": [{"name": "Venue"}],
             },
             "classifications": [{"genre": {"name": "Rock"}, "subGenre": {"name": "Indie Rock"}}],
+            "images": [
+                {"ratio": "3_2", "url": "https://tm.test/3x2.jpg", "width": 640, "fallback": False},
+                {"ratio": "16_9", "url": "https://tm.test/16x9.jpg", "width": 1024, "fallback": False},
+            ],
         }
         parsed = parse_tm_event(raw, "345")
         assert parsed["subgenre"] == "Indie Rock"
         assert parsed["url"] == "https://tm.test/show"
         assert parsed["tm_upcoming_events"] == 12
+        # Hero-banner shape wins over a bigger non-16:9 image.
+        assert parsed["image_url"] == "https://tm.test/16x9.jpg"
 
     def test_missing_fields_parse_as_none(self):
         raw = {"id": "EVT2", "name": "Bare Show"}
@@ -40,6 +46,20 @@ class TestParseTmEvent:
         assert parsed["subgenre"] is None
         assert parsed["url"] is None
         assert parsed["tm_upcoming_events"] is None
+        assert parsed["image_url"] is None
+
+    def test_image_picker_prefers_widest_non_fallback(self):
+        raw = {
+            "id": "EVT3",
+            "name": "Show",
+            "images": [
+                {"ratio": "16_9", "url": "https://tm.test/small.jpg", "width": 640, "fallback": False},
+                {"ratio": "16_9", "url": "https://tm.test/fallback.jpg", "width": 2048, "fallback": True},
+                {"ratio": "16_9", "url": "https://tm.test/large.jpg", "width": 1024, "fallback": False},
+            ],
+        }
+        # Real image beats a wider fallback; among reals, widest wins.
+        assert parse_tm_event(raw, "345")["image_url"] == "https://tm.test/large.jpg"
 
 
 class TestGenreSync:

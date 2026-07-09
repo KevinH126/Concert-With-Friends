@@ -49,6 +49,7 @@ class EventResponse(BaseModel):
     genre: str | None
     subgenre: str | None
     url: str | None
+    image_url: str | None
     my_interest: str | None  # 'going' | 'maybe' | None
     my_interest_visibility: str | None  # 'shared' | 'private' | None
     # One strip, ordered marked-going > marked-maybe > predicted. No numeric scores
@@ -194,6 +195,7 @@ async def get_feed(
             genre=e.genre,
             subgenre=e.subgenre,
             url=e.url,
+            image_url=e.image_url,
             my_interest=interests[e.id].level if e.id in interests else None,
             my_interest_visibility=interests[e.id].visibility if e.id in interests else None,
             friends_going=sorted(friends_going.get(e.id, []), key=_strip_order),
@@ -213,6 +215,7 @@ class MyInterestResponse(BaseModel):
     starts_at: datetime | None
     genre: str | None
     url: str | None
+    image_url: str | None
     level: str  # 'going' | 'maybe'
     visibility: str  # 'shared' | 'private'
     is_past: bool
@@ -243,6 +246,7 @@ async def my_interests(
             starts_at=e.starts_at,
             genre=e.genre,
             url=e.url,
+            image_url=e.image_url,
             level=interest.level,
             visibility=interest.visibility,
             is_past=e.starts_at is not None and e.starts_at < now,

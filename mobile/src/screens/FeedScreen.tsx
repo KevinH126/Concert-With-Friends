@@ -1,49 +1,48 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, RefreshControl, Share,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   FeedEvent, FriendGoing, FriendPredicted, getFeed, removeInterest, setInterest,
 } from '../api/feed';
 import { EventSearchResult, searchEvents } from '../api/events';
+import { Avatar, Card, Chip, Icon, IconName } from '../components';
+import { radii, spacing, type as typeScale, useTheme } from '../theme';
 
 function joinNames(names: string[]): string {
   if (names.length <= 1) return names[0] ?? '';
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
-// One strip, ordered marked-going > marked-maybe > predicted. The two prediction
-// buckets are wording only — no scores or meters, per the locked P3 decision.
-function friendsGoingText(fg: FriendGoing[]): string {
+// Avatars carry "who", so the summary is just the verb phrase — no emoji, no icon.
+function goingSummary(fg: FriendGoing[]): string {
   const going = fg.filter((f) => f.level === 'going').map((f) => f.display_name);
   const maybe = fg.filter((f) => f.level === 'maybe').map((f) => f.display_name);
   const parts: string[] = [];
   if (going.length) parts.push(`${joinNames(going)} ${going.length > 1 ? 'are' : 'is'} going`);
   if (maybe.length) parts.push(`${joinNames(maybe)} might go`);
-  return `👥 ${parts.join(' · ')}`;
+  return parts.join(' · ');
 }
 
-// One line per predicted friend, naming *why* (the strongest taste signal) rather
-// than hedging with "probably" vs "might". Artist reasons reuse the card's own
-// artist name; genre reasons carry the matched genre from the API.
-function predictionLine(fp: FriendPredicted, artistName: string | null): string {
+// Predictions name *why* (the strongest taste signal). The icon replaces the old emoji:
+// a favorite-artist reason gets the star, everything else the sparkles.
+function predictionParts(fp: FriendPredicted, artistName: string | null): { icon: IconName; text: string } {
   const who = fp.display_name;
   if (fp.reason_kind === 'favorite_artist' && artistName) {
-    return `🎯 ${artistName} is one of ${who}'s favorites`;
+    return { icon: 'favorite', text: `${artistName} is one of ${who}'s favorites` };
   }
   if (fp.reason_kind === 'artist' && artistName) {
-    return `✨ ${who} is into ${artistName}`;
+    return { icon: 'prediction', text: `${who} is into ${artistName}` };
   }
   if (fp.reason_kind === 'genre' && fp.reason_genre) {
-    return `✨ Matches ${who}'s taste in ${fp.reason_genre}`;
+    return { icon: 'prediction', text: `Matches ${who}'s taste in ${fp.reason_genre}` };
   }
-  return `✨ ${who} might be into this`; // fallback if a reason field is missing
+  return { icon: 'prediction', text: `${who} might be into this` };
 }
 
-// Show the most specific label available: "Rock · Alternative Rock" when the event
-// carries a sub-genre, falling back to whichever of the two exists on its own.
 function genreLabel(genre: string | null, subgenre: string | null): string | null {
   if (genre && subgenre && genre !== subgenre) return `${genre} · ${subgenre}`;
   return subgenre ?? genre ?? null;
@@ -56,7 +55,21 @@ function formatDate(iso: string | null): string | null {
   });
 }
 
+// Hero image, or a calm branded placeholder when TM gave us no image for the show.
+function HeroImage({ uri }: { uri: string | null }) {
+  const { colors } = useTheme();
+  if (!uri) {
+    return (
+      <View style={[styles.hero, styles.heroFallback, { backgroundColor: colors.surfaceSunken }]}>
+        <Icon name="music" size={32} color={colors.labelTertiary} />
+      </View>
+    );
+  }
+  return <Image source={uri} style={styles.hero} contentFit="cover" transition={200} />;
+}
+
 export default function FeedScreen() {
+  const { colors } = useTheme();
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -81,9 +94,6 @@ export default function FeedScreen() {
     }
   }, []);
 
-  // Reload whenever the tab regains focus (taste/metro may have changed on another
-  // tab). The screen stays mounted in the tab navigator, so a mount-only effect would
-  // never refetch. Existing events stay visible during the refetch — no spinner flicker.
   useFocusEffect(
     useCallback(() => {
       load().finally(() => setLoading(false));
@@ -120,8 +130,7 @@ export default function FeedScreen() {
     setRefreshing(false);
   };
 
-  // Tap = shared interest; long-press = private (feeds your own feed/notifications
-  // but is hidden from friends). Tapping the same active level clears it.
+  // Tap = shared interest; long-press = private. Tapping the active level clears it.
   const toggleInterest = async (
     event: FeedEvent,
     level: 'going' | 'maybe',
@@ -142,7 +151,6 @@ export default function FeedScreen() {
     }
   };
 
-  // Search results only know the level (not visibility); tap toggles shared interest.
   const toggleSearchInterest = async (result: EventSearchResult, level: 'going' | 'maybe') => {
     try {
       if (result.my_interest === level) {
@@ -159,8 +167,6 @@ export default function FeedScreen() {
     }
   };
 
-  // Compose-sheet hand-off: ≥1 friend with shared MARKED interest is a plan.
-  // In P7 this button points inward to in-app chat instead.
   const shareEvent = async (event: FeedEvent) => {
     const bits = [event.name, event.venue_name, formatDate(event.starts_at)]
       .filter(Boolean)
@@ -173,71 +179,114 @@ export default function FeedScreen() {
     }
   };
 
+  // A single interest toggle (Going/Maybe). Active fills with the status color.
+  const InterestToggle = ({
+    label, level, active, isPrivate, onPress, onLongPress,
+  }: {
+    label: string;
+    level: 'going' | 'maybe';
+    active: boolean;
+    isPrivate?: boolean;
+    onPress: () => void;
+    onLongPress?: () => void;
+  }) => {
+    const activeColor = level === 'going' ? colors.going : colors.maybe;
+    return (
+      <TouchableOpacity
+        style={[
+          styles.interestBtn,
+          { borderColor: active ? activeColor : colors.separator },
+          active && { backgroundColor: activeColor },
+        ]}
+        onPress={onPress}
+        onLongPress={onLongPress}
+        activeOpacity={0.7}
+      >
+        <Text style={[styles.interestText, { color: active ? colors.onStatus : colors.labelSecondary }]}>
+          {label}
+        </Text>
+        {active && isPrivate && <Icon name="private" size={13} color={colors.onStatus} />}
+      </TouchableOpacity>
+    );
+  };
+
   if (loading) {
-    return <ActivityIndicator style={styles.center} size="large" color="#6200EE" />;
+    return <ActivityIndicator style={styles.center} size="large" color={colors.accent} />;
   }
 
   if (needsMetro) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.empty}>Set your home metro to see shows.</Text>
-        <Text style={styles.emptySub}>Go to the Profile tab and enter your metro ID.</Text>
+      <View style={[styles.container, styles.center, { backgroundColor: colors.background }]}>
+        <Icon name="search" size={40} color={colors.labelTertiary} />
+        <Text style={[styles.empty, { color: colors.label }]}>Set your home metro to see shows.</Text>
+        <Text style={[styles.emptySub, { color: colors.labelSecondary }]}>
+          Go to the Profile tab and enter your metro ID.
+        </Text>
       </View>
     );
   }
 
   const searchBar = (
-    <TextInput
-      style={styles.searchInput}
-      placeholder="Search shows, artists, venues…"
-      value={query}
-      onChangeText={setQuery}
-      autoCorrect={false}
-      clearButtonMode="while-editing"
-    />
+    <View style={[styles.searchField, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+      <Icon name="search" size={17} color={colors.labelTertiary} />
+      <TextInput
+        style={[styles.searchInput, { color: colors.label }]}
+        placeholder="Search shows, artists, venues…"
+        placeholderTextColor={colors.labelTertiary}
+        value={query}
+        onChangeText={setQuery}
+        autoCorrect={false}
+        clearButtonMode="while-editing"
+      />
+    </View>
   );
 
+  // Search-result card: same hero + core info, simpler actions (no private, no social).
   if (results !== null) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.searchWrap}>{searchBar}</View>
         {searching ? (
-          <ActivityIndicator style={{ marginTop: 24 }} color="#6200EE" />
+          <ActivityIndicator style={{ marginTop: spacing.xl }} color={colors.accent} />
         ) : (
           <FlatList
             data={results}
             keyExtractor={(r) => r.id}
             contentContainerStyle={styles.list}
             ListEmptyComponent={
-              <Text style={[styles.emptySub, { textAlign: 'center', marginTop: 24 }]}>
+              <Text style={[styles.emptySub, { color: colors.labelSecondary, textAlign: 'center', marginTop: spacing.xl }]}>
                 No upcoming shows match "{query.trim()}".
               </Text>
             }
             renderItem={({ item }) => (
-              <View style={styles.card}>
-                <Text style={styles.eventName}>{item.name}</Text>
-                {item.artist_name && <Text style={styles.meta}>{item.artist_name}</Text>}
-                {item.venue_name && <Text style={styles.meta}>{item.venue_name}</Text>}
-                {item.starts_at && <Text style={styles.date}>{formatDate(item.starts_at)}</Text>}
-                <View style={styles.actions}>
-                  <TouchableOpacity
-                    style={[styles.interestBtn, item.my_interest === 'going' && styles.activeGoing]}
-                    onPress={() => toggleSearchInterest(item, 'going')}
-                  >
-                    <Text style={[styles.interestText, item.my_interest === 'going' && styles.activeText]}>
-                      Going
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.interestBtn, item.my_interest === 'maybe' && styles.activeMaybe]}
-                    onPress={() => toggleSearchInterest(item, 'maybe')}
-                  >
-                    <Text style={[styles.interestText, item.my_interest === 'maybe' && styles.activeText]}>
-                      Maybe
-                    </Text>
-                  </TouchableOpacity>
+              <Card padded={false}>
+                <HeroImage uri={item.image_url} />
+                <View style={styles.cardBody}>
+                  <Text style={[styles.eventName, { color: colors.label }]}>{item.name}</Text>
+                  {item.artist_name && (
+                    <Text style={[styles.meta, { color: colors.labelSecondary }]}>{item.artist_name}</Text>
+                  )}
+                  {item.venue_name && (
+                    <Text style={[styles.meta, { color: colors.labelSecondary }]}>{item.venue_name}</Text>
+                  )}
+                  {item.starts_at && (
+                    <Text style={[styles.date, { color: colors.accent }]}>{formatDate(item.starts_at)}</Text>
+                  )}
+                  {genreLabel(item.genre, null) && (
+                    <View style={styles.chipRow}><Chip label={genreLabel(item.genre, null)!} /></View>
+                  )}
+                  <View style={styles.actions}>
+                    <InterestToggle
+                      label="Going" level="going" active={item.my_interest === 'going'}
+                      onPress={() => toggleSearchInterest(item, 'going')}
+                    />
+                    <InterestToggle
+                      label="Maybe" level="maybe" active={item.my_interest === 'maybe'}
+                      onPress={() => toggleSearchInterest(item, 'maybe')}
+                    />
+                  </View>
                 </View>
-              </View>
+              </Card>
             )}
           />
         )}
@@ -246,112 +295,150 @@ export default function FeedScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.searchWrap}>{searchBar}</View>
       {events.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={styles.empty}>No upcoming shows match your taste.</Text>
-          <Text style={styles.emptySub}>Add artists or genres in the Taste tab.</Text>
+        <View style={[styles.center, { paddingBottom: 80 }]}>
+          <Icon name="music" size={40} color={colors.labelTertiary} />
+          <Text style={[styles.empty, { color: colors.label }]}>No upcoming shows match your taste.</Text>
+          <Text style={[styles.emptySub, { color: colors.labelSecondary }]}>
+            Add artists or genres in the Taste tab.
+          </Text>
         </View>
       ) : (
         <FlatList
           data={events}
           keyExtractor={(e) => e.id}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
           contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <Text style={styles.eventName}>{item.name}</Text>
-              {item.artist_name && <Text style={styles.meta}>{item.artist_name}</Text>}
-              {item.venue_name && <Text style={styles.meta}>{item.venue_name}</Text>}
-              {item.starts_at && <Text style={styles.date}>{formatDate(item.starts_at)}</Text>}
-              {genreLabel(item.genre, item.subgenre) && (
-                <Text style={styles.genre}>{genreLabel(item.genre, item.subgenre)}</Text>
-              )}
-              {item.friends_going.length > 0 && (
-                <Text style={styles.friendsStrip}>{friendsGoingText(item.friends_going)}</Text>
-              )}
-              {item.friends_predicted.map((fp) => (
-                <Text
-                  key={fp.user_id}
-                  style={[styles.predictedStrip, fp.bucket === 'probably' && styles.predictedStrong]}
-                >
-                  {predictionLine(fp, item.artist_name)}
-                </Text>
-              ))}
-              <View style={styles.actions}>
-                <TouchableOpacity
-                  style={[styles.interestBtn, item.my_interest === 'going' && styles.activeGoing]}
-                  onPress={() => toggleInterest(item, 'going')}
-                  onLongPress={() => toggleInterest(item, 'going', 'private')}
-                >
-                  <Text style={[styles.interestText, item.my_interest === 'going' && styles.activeText]}>
-                    Going{item.my_interest === 'going' && item.my_interest_visibility === 'private' ? ' 🔒' : ''}
+          renderItem={({ item }) => {
+            const summary = goingSummary(item.friends_going);
+            return (
+              <Card padded={false}>
+                <HeroImage uri={item.image_url} />
+                <View style={styles.cardBody}>
+                  <Text style={[styles.eventName, { color: colors.label }]}>{item.name}</Text>
+
+                  {/* Social headline — confirmed friends, elevated with faces. */}
+                  {item.friends_going.length > 0 && (
+                    <View style={styles.social}>
+                      <View style={styles.avatarRow}>
+                        {item.friends_going.slice(0, 4).map((f, i) => (
+                          <View key={f.user_id} style={{ marginLeft: i === 0 ? 0 : -8 }}>
+                            <Avatar name={f.display_name} size={26} ring />
+                          </View>
+                        ))}
+                      </View>
+                      <Text style={[styles.socialText, { color: colors.label }]} numberOfLines={2}>
+                        {summary}
+                      </Text>
+                    </View>
+                  )}
+
+                  {item.artist_name && (
+                    <Text style={[styles.meta, { color: colors.labelSecondary }]}>{item.artist_name}</Text>
+                  )}
+                  {item.venue_name && (
+                    <Text style={[styles.meta, { color: colors.labelSecondary }]}>{item.venue_name}</Text>
+                  )}
+                  {item.starts_at && (
+                    <Text style={[styles.date, { color: colors.accent }]}>{formatDate(item.starts_at)}</Text>
+                  )}
+                  {genreLabel(item.genre, item.subgenre) && (
+                    <View style={styles.chipRow}><Chip label={genreLabel(item.genre, item.subgenre)!} /></View>
+                  )}
+
+                  {/* Predictions — quiet, avatar-less, reason-named. */}
+                  {item.friends_predicted.map((fp) => {
+                    const p = predictionParts(fp, item.artist_name);
+                    return (
+                      <View key={fp.user_id} style={styles.predicted}>
+                        <Icon name={p.icon} size={13} color={colors.labelTertiary} />
+                        <Text style={[styles.predictedText, { color: colors.labelSecondary }]}>{p.text}</Text>
+                      </View>
+                    );
+                  })}
+
+                  <View style={styles.actions}>
+                    <InterestToggle
+                      label="Going" level="going"
+                      active={item.my_interest === 'going'}
+                      isPrivate={item.my_interest_visibility === 'private'}
+                      onPress={() => toggleInterest(item, 'going')}
+                      onLongPress={() => toggleInterest(item, 'going', 'private')}
+                    />
+                    <InterestToggle
+                      label="Maybe" level="maybe"
+                      active={item.my_interest === 'maybe'}
+                      isPrivate={item.my_interest_visibility === 'private'}
+                      onPress={() => toggleInterest(item, 'maybe')}
+                      onLongPress={() => toggleInterest(item, 'maybe', 'private')}
+                    />
+                  </View>
+
+                  {item.friends_going.length > 0 && (
+                    <TouchableOpacity
+                      style={[styles.planBtn, { borderColor: colors.accent }]}
+                      onPress={() => shareEvent(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Icon name="share" size={16} color={colors.accent} weight="semibold" />
+                      <Text style={[styles.planText, { color: colors.accent }]}>Make a plan</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  <Text style={[styles.hint, { color: colors.labelTertiary }]}>
+                    Long-press Going/Maybe to mark privately
                   </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.interestBtn, item.my_interest === 'maybe' && styles.activeMaybe]}
-                  onPress={() => toggleInterest(item, 'maybe')}
-                  onLongPress={() => toggleInterest(item, 'maybe', 'private')}
-                >
-                  <Text style={[styles.interestText, item.my_interest === 'maybe' && styles.activeText]}>
-                    Maybe{item.my_interest === 'maybe' && item.my_interest_visibility === 'private' ? ' 🔒' : ''}
-                  </Text>
-                </TouchableOpacity>
-                {item.friends_going.length > 0 && (
-                  <TouchableOpacity style={styles.shareBtn} onPress={() => shareEvent(item)}>
-                    <Text style={styles.shareText}>Make a plan ↗</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              <Text style={styles.hint}>Long-press to mark privately (hidden from friends)</Text>
-            </View>
-          )}
+                </View>
+              </Card>
+            );
+          }}
         />
       )}
     </View>
   );
 }
 
+// Layout/metrics only — all colors come from the theme at render time (so P7.5's dark
+// values flow through without touching this sheet).
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  empty: { fontSize: 16, color: '#444', marginBottom: 8 },
-  emptySub: { fontSize: 14, color: '#888' },
-  searchWrap: { paddingHorizontal: 16, paddingTop: 12 },
-  searchInput: {
-    borderWidth: 1, borderColor: '#ddd', backgroundColor: '#fff',
-    borderRadius: 10, padding: 10, fontSize: 15,
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: spacing.sm },
+  empty: { ...typeScale.headline, marginTop: spacing.sm },
+  emptySub: { ...typeScale.body },
+  searchWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xs },
+  searchField: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    borderWidth: 1, borderRadius: radii.md, paddingHorizontal: spacing.md, height: 40,
   },
-  list: { padding: 16, gap: 12 },
-  card: {
-    backgroundColor: '#fff', borderRadius: 12, padding: 16,
-    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+  searchInput: { flex: 1, ...typeScale.body },
+  list: { padding: spacing.lg, gap: spacing.lg },
+  hero: { width: '100%', aspectRatio: 16 / 9 },
+  heroFallback: { alignItems: 'center', justifyContent: 'center' },
+  cardBody: { padding: spacing.lg, gap: spacing.xs },
+  eventName: { ...typeScale.title },
+  meta: { ...typeScale.body },
+  date: { ...typeScale.callout, marginTop: spacing.xs },
+  chipRow: { marginTop: spacing.xs, marginBottom: spacing.xs },
+  social: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginTop: spacing.xs, marginBottom: spacing.xs,
   },
-  eventName: { fontSize: 17, fontWeight: '600', marginBottom: 4 },
-  meta: { fontSize: 14, color: '#555' },
-  date: { fontSize: 13, color: '#6200EE', marginTop: 4 },
-  genre: {
-    alignSelf: 'flex-start', marginTop: 6,
-    backgroundColor: '#f0e6ff', color: '#6200EE',
-    fontSize: 12, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10,
-  },
-  friendsStrip: { fontSize: 13, color: '#00695C', marginTop: 8, fontWeight: '500' },
-  predictedStrip: { fontSize: 13, color: '#7B1FA2', marginTop: 4, fontWeight: '500' },
-  predictedStrong: { color: '#4A148C', fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  hint: { fontSize: 11, color: '#aaa', marginTop: 6, textAlign: 'center' },
+  avatarRow: { flexDirection: 'row' },
+  socialText: { ...typeScale.headline, flex: 1 },
+  predicted: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
+  predictedText: { ...typeScale.callout, flex: 1 },
+  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   interestBtn: {
-    flex: 1, borderWidth: 1, borderColor: '#ddd',
-    borderRadius: 8, padding: 8, alignItems: 'center',
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    borderWidth: 1, borderRadius: radii.md, paddingVertical: spacing.md,
   },
-  activeGoing: { backgroundColor: '#00897B', borderColor: '#00897B' },
-  activeMaybe: { backgroundColor: '#FB8C00', borderColor: '#FB8C00' },
-  interestText: { fontSize: 14, color: '#444', fontWeight: '500' },
-  activeText: { color: '#fff' },
-  shareBtn: {
-    flex: 1, borderWidth: 1, borderColor: '#6200EE',
-    borderRadius: 8, padding: 8, alignItems: 'center',
+  interestText: { ...typeScale.headline },
+  planBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    borderWidth: 1, borderRadius: radii.md, paddingVertical: spacing.md, marginTop: spacing.sm,
   },
-  shareText: { fontSize: 14, color: '#6200EE', fontWeight: '600' },
+  planText: { ...typeScale.headline },
+  hint: { ...typeScale.caption, textAlign: 'center', marginTop: spacing.sm },
 });

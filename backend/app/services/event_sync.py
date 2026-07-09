@@ -59,6 +59,7 @@ async def sync_metro(metro_id: str, session_factory=None) -> int:
                     genre=parsed["genre"],
                     subgenre=parsed["subgenre"],
                     url=parsed["url"],
+                    image_url=parsed["image_url"],
                 )
                 .on_conflict_do_update(
                     index_elements=["tm_event_id"],
@@ -70,6 +71,7 @@ async def sync_metro(metro_id: str, session_factory=None) -> int:
                         "genre": parsed["genre"],
                         "subgenre": parsed["subgenre"],
                         "url": parsed["url"],
+                        "image_url": parsed["image_url"],
                     },
                 )
             )

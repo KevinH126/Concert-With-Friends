@@ -132,12 +132,13 @@ on its own.
 P1    Solo feed                              ✅ done (sync is MANUAL, not scheduled yet)
 P1.5  Deploy the backend                     ✅ done (live on Render)
 P2    Social graph + interest-marking        ✅ done (verified on prod)
-P3    Matching  (+ ranked feed, event search, compose-sheet hand-off)   ← next
-P3.5  UI pass                                (after P3 reshapes the feed card; before P4)
+P3    Matching  (+ ranked feed, event search, compose-sheet hand-off)   ✅ done (verified on prod)
+P3.5  UI pass  (lean-but-tasteful foundation)   ← next (design locked 2026-07-08)
 P4    Notification pipeline                   ★ CENTERPIECE 1
 P5    Push delivery  (+ onboard the real friend group)
 P6    Taste-set expansion (Spotify)
 P7    In-app chat                             ★ CENTERPIECE 2
+P7.5  Native UI showcase pass                 (deep re-skin of the feature-complete app)
 P8+   Backlog
 ```
 
@@ -280,21 +281,68 @@ Matching **plus the feed's ranking brain** — one pure scorer used everywhere.
 - **Done when:** the feed is ranked and searchable, and event cards tell you *who* to go
   with — marked friends first, predicted friends labeled by confidence.
 
-### P3.5 — UI pass *(added 2026-07-01)*
+### P3.5 — UI pass *(added 2026-07-01; design locked 2026-07-08)*
 Deliberately scheduled **after P3** (matching reshapes the feed card — the app's
 centerpiece screen — so polishing it earlier is rework) and **before P4** (the pipeline
 is ~pure backend, so this delays nothing, and demos look good during the P4 grind).
 Must land before real friends onboard at P5 — first impressions happen then.
-- [ ] Extract `theme.ts` (colors/spacing/radii) + shared components (`Button`, `Card`,
-      `Chip`) — **start using these from the first P3 screen onward**; the pass then
-      becomes a re-skin, not a rewrite.
-- [ ] Visual identity: pick the look from a reference folder (collect screenshots
-      during P3 — Songkick / Bandsintown / Dice event cards are the comps).
-- [ ] Feed card redesign around the P3 headline ("Sam and Alex would probably go").
-- [ ] Navigation polish, empty states, loading states (skeletons over spinners).
-- [ ] Sweep the hardcoded `#6200EE`s (~8 files) into the theme.
-- **Scope guard:** this is a re-skin + consistency pass, not a redesign of flows. UX
-  good enough not to embarrass the backend — the backend stays the differentiator.
+
+**Reframed 2026-07-08:** this pass's job is **presentable for P5 + a foundation that makes
+the later showcase cheap** — NOT the final look. The ambitious native investment moves to a
+new **post-P7 pass** (see below): two of the biggest UI surfaces — P5's notification UI and
+P7's entire chat screen family — don't exist yet, so the deep re-skin belongs *after* the
+app is feature-complete, done once over the whole surface. That makes P3.5 lean-but-tasteful.
+
+**Foundation (locked):** plain RN + `theme.ts` design tokens + shared `Button`/`Card`/`Chip`;
+the `expo-native-ui` skill is the **taste guide**, not a rendering change (rejected `@expo/ui`
+= a rewrite that violates the scope guard, and NativeWind = a styling paradigm + dependency a
+token file already replaces).
+- [ ] `theme.ts` with **semantic** tokens (roles not values: `background`/`surface`/`label`/
+      `labelSecondary`/`separator`/`accent` + `going`/`maybe` status). Neutrals = platform
+      **system grays** (adapt light/dark free). **Light values filled now; dark half + QA
+      deferred to the post-P7 pass** — naming roles now is free while there are only 7 screens
+      and buys near-free dark mode later.
+- [ ] Shared `Button` (`primary` = magenta fill / `secondary` = outline), `Card`, `Chip`
+      (`display` = genre / `selectable` = taste picker).
+- [ ] `Icon` wrapper: **SF Symbols** (`expo-symbols`) on iOS, `@expo/vector-icons` Material
+      fallback on Android (iOS-primary; a few friends on Android). **Zero emoji** — strip
+      markers become symbols (`person.2.fill`, `sparkles`, `star.fill`, `lock.fill`,
+      `square.and.arrow.up`).
+
+**Identity (locked):** **magenta/pink accent** (~`#E8005A`) as the single tint over **cool
+system-gray neutrals**; escapes the Material-default `#6200EE` that reads "unfinished."
+Typography = iOS **system font (SF)** + Dynamic Type with a title/headline/body/caption scale
+(custom brand font deferred to post-P7). **Going/Maybe stay distinct status colors**
+(system green / amber), never folded into the accent (accent = primary actions/links/active
+chips). Comps: Songkick / Bandsintown / Dice (functional, image-forward — not Dice's editorial
+overlay).
+
+**Feed card redesign (the hero, locked):**
+- [ ] **Backend: nullable `events.image_url`**, populated from TM's already-fetched `images`
+      array at sync, exposed on `/feed` + `/events/search`. The one sanctioned backend touch
+      this pass — additive, no logic change; redeploy + re-sync per the known pattern. A
+      text-only event feed undercuts everything else ("it looks like crap without it").
+- [ ] **Hero image on top**, all content + controls on the solid surface below (readability
+      beats the overlay look once a card has 3 predicted friends + a private-mark lock).
+- [ ] **Social headline:** initials-avatar row + bold summary for **confirmed** friends,
+      elevated under the title; **muted, avatar-less `sparkles` reason lines** for
+      **predictions** (a guess doesn't earn a face). Keeps the locked P3 rule — confirmed
+      loud, predicted quiet, buckets are wording, no numbers/meters.
+
+**Consistency + states (locked): full sweep, all 7 screens.**
+- [ ] Re-skin Login / Feed / My Shows / Friends / FriendProfile / Taste / Profile onto tokens
+      + shared components; kill every hardcoded `#6200EE`. (Cheap once the foundation exists —
+      mostly token + component swaps; a magenta feed next to 6 purple screens reads
+      half-finished, defeating a *consistency* pass.)
+- [ ] Card-shaped **skeleton** shimmer (over spinners) on Feed/Taste/My Shows; designed empty
+      states.
+
+**Build order:** ① backend `image_url` → ② `theme.ts` + `Icon` + `Button`/`Card`/`Chip` →
+③ feed card (verify on device via tunnel) → ④ sweep the other six → ⑤ skeletons + empty states.
+
+- **Scope guard (still holds, reframed):** re-skin + consistency pass, not a redesign of
+  flows. Presentable for P5, foundation for the post-P7 showcase — the backend stays the
+  differentiator.
 
 ### P4 — Notification pipeline ★ CENTERPIECE 1
 Scheduled background job (Celery beat), not request-driven. This is the resume sentence.
@@ -394,6 +442,20 @@ Replaces the P3 compose-sheet hand-off button with a real system.
 - [ ] A thread per show, seeded with the friends who are going.
 - **Built last on purpose:** its value is additive, not structural, so a time-crunch
   leaves a finished app + one centerpiece rather than two stubs.
+
+### P7.5 — Native UI showcase pass *(added 2026-07-08)*
+The ambitious visual investment, deliberately deferred here from P3.5. **Rationale:** the two
+biggest UI surfaces (P5 notification UI, P7 chat) don't exist during P3.5 — you can't skin
+what isn't built, and skinning the current screens deeply now just guarantees a re-skin when
+those land. This pass re-skins the **feature-complete** app once, coherently.
+- [ ] Fill the **dark half** of every semantic token (P3.5 wired the structure) + QA both modes
+      across all screens.
+- [ ] Evaluate **`@expo/ui`** (real SwiftUI on iOS) for the surfaces where it earns its
+      per-platform cost; iOS-primary makes this viable.
+- [ ] Custom brand **display font** for headings (deferred from P3.5's system-font baseline).
+- [ ] Motion/transitions, richer empty + error states, per-platform polish.
+- **Precondition:** P3.5's `theme.ts` + shared components exist, so this is "change token
+  values + component internals," not "touch every screen again."
 
 ---
 

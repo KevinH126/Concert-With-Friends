@@ -27,6 +27,7 @@ class EventSearchResult(BaseModel):
     starts_at: datetime | None
     genre: str | None
     url: str | None
+    image_url: str | None
     my_interest: str | None  # 'going' | 'maybe' | None
 
 
@@ -78,6 +79,7 @@ async def search_events(
             starts_at=e.starts_at,
             genre=e.genre,
             url=e.url,
+            image_url=e.image_url,
             my_interest=interests.get(e.id),
         )
         for e in events

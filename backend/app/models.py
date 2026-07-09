@@ -157,6 +157,7 @@ class Event(Base):
     genre = Column(Text, nullable=True)
     subgenre = Column(Text, nullable=True)  # P3: TM subGenre (sub-genre match scores higher)
     url = Column(Text, nullable=True)  # P3: TM event link (compose-sheet share text)
+    image_url = Column(Text, nullable=True)  # P3.5: TM hero image (16:9) for the feed card
     fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     artist = relationship("Artist", back_populates="events")

@@ -115,6 +115,24 @@ def _parse_dt(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _pick_image(raw: dict) -> str | None:
+    """Choose a hero image from TM's images array. Prefer the 16:9 shape (fills a
+    card banner cleanly), a real image over TM's generic fallback, then the widest.
+    TM populates images on essentially every event, but tolerate their absence."""
+    images = raw.get("images") or []
+    if not images:
+        return None
+    best = max(
+        images,
+        key=lambda img: (
+            img.get("ratio") == "16_9",
+            not img.get("fallback", False),
+            img.get("width", 0),
+        ),
+    )
+    return best.get("url")
+
+
 def parse_tm_event(raw: dict, metro_id: str) -> dict:
     """Normalize a raw Ticketmaster event dict into the shape our DB expects."""
     starts_at = None
@@ -151,6 +169,7 @@ def parse_tm_event(raw: dict, metro_id: str) -> dict:
         "genre": genre,
         "subgenre": subgenre,
         "url": raw.get("url"),
+        "image_url": _pick_image(raw),
     }
 
 
@@ -217,6 +236,9 @@ def _stub_events(metro_id: str) -> list[dict]:
             "id": "STUB_EVT_001",
             "name": "Radiohead Live",
             "url": "https://stub.ticketmaster.test/radiohead-live",
+            "images": [
+                {"ratio": "16_9", "url": "https://picsum.photos/seed/radiohead/1024/576", "width": 1024, "fallback": False},
+            ],
             "dates": {"start": {"dateTime": "2026-08-15T20:00:00Z"}},
             "_embedded": {
                 "attractions": [{
@@ -231,6 +253,9 @@ def _stub_events(metro_id: str) -> list[dict]:
         {
             "id": "STUB_EVT_002",
             "name": "Thom Yorke Solo",
+            "images": [
+                {"ratio": "16_9", "url": "https://picsum.photos/seed/thomyorke/1024/576", "width": 1024, "fallback": False},
+            ],
             "dates": {"start": {"dateTime": "2026-09-01T19:30:00Z"}},
             "_embedded": {
                 "attractions": [{"id": "STUB_ATT_THOM", "name": "Thom Yorke"}],

@@ -26,6 +26,7 @@ export interface FeedEvent {
   genre: string | null;
   subgenre: string | null;
   url: string | null;
+  image_url: string | null;
   my_interest: 'going' | 'maybe' | null;
   my_interest_visibility: 'shared' | 'private' | null;
   friends_going: FriendGoing[];
@@ -46,6 +47,7 @@ export interface MyInterest {
   starts_at: string | null;
   genre: string | null;
   url: string | null;
+  image_url: string | null;
   level: 'going' | 'maybe';
   visibility: 'shared' | 'private';
   is_past: boolean;

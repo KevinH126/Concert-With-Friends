@@ -8,6 +8,7 @@ export interface EventSearchResult {
   starts_at: string | null;
   genre: string | null;
   url: string | null;
+  image_url: string | null;
   my_interest: 'going' | 'maybe' | null;
 }
 
