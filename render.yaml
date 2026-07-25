@@ -40,3 +40,48 @@ services:
         generateValue: true # ops token for /admin; distinct from SECRET_KEY
       - key: TICKETMASTER_API_KEY
         sync: false # paste in the Render dashboard (not committed)
+      - key: REDIS_URL # web enqueues friend-mark pings to the worker (P4)
+        fromService:
+          type: redis
+          name: cwf-redis
+          property: connectionString
+
+  # P4 notification pipeline: worker + beat in ONE process at concurrency 1 (sequential
+  # metros keep the TM 5-req/sec ceiling safe). Same Docker image as the web service, with
+  # the command overridden to run Celery instead of uvicorn. This is the first PAID service
+  # beyond Postgres (~$7/mo); free tier has no background workers.
+  - type: worker
+    name: cwf-worker
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    region: virginia # keep same region as the database + web
+    plan: starter # VERIFY the current slug in the dashboard before apply
+    dockerCommand: celery -A app.worker worker -B --concurrency=1 --loglevel=info
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cwf-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: cwf-redis
+          property: connectionString
+      - key: TICKETMASTER_API_KEY
+        sync: false # the worker runs the metro sync — needs the real key (same as web)
+      # secret_key / admin_token are required by app.config but unused by the worker
+      # (it issues no JWTs, serves no admin routes) — any value is fine.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ADMIN_TOKEN
+        generateValue: true
+
+  # Broker + result backend for Celery. Free Key Value tier (no persistence): the queue is
+  # transient — a restart at most loses an in-flight nightly run, which the next diff
+  # re-derives (idempotent by design). VERIFY the free plan slug/size in the dashboard.
+  - type: redis
+    name: cwf-redis
+    plan: free
+    ipAllowList: [] # reachable only from within the Render private network
