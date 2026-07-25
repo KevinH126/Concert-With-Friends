@@ -101,8 +101,8 @@ alembic upgrade head
 **Celery worker + beat (event sync + notification pipeline — arrives in P4):**
 ```bash
 cd backend
-celery -A app.worker worker --loglevel=info
-celery -A app.worker beat --loglevel=info
+# P4 prod runs worker + beat in ONE process at concurrency=1 (see the P4 section):
+celery -A app.worker worker -B --concurrency=1 --loglevel=info
 ```
 
 **Manually trigger an event sync** (no Celery needed — this is the P1 sync mechanism):
@@ -133,8 +133,9 @@ P1    Solo feed                              ✅ done (sync is MANUAL, not sched
 P1.5  Deploy the backend                     ✅ done (live on Render)
 P2    Social graph + interest-marking        ✅ done (verified on prod)
 P3    Matching  (+ ranked feed, event search, compose-sheet hand-off)   ✅ done (verified on prod)
-P3.5  UI pass  (lean-but-tasteful foundation)   ← next (design locked 2026-07-08)
-P4    Notification pipeline                   ★ CENTERPIECE 1
+P3.5  UI pass  (lean-but-tasteful foundation)   ✅ done (device-verified 2026-07-25)
+P4    Notification pipeline                   ★ CENTERPIECE 1   ← next (grilled + locked 2026-07-25)
+P4.5  Travel-willingness / anywhere-sync      (own phase right after the pipeline)
 P5    Push delivery  (+ onboard the real friend group)
 P6    Taste-set expansion (Spotify)
 P7    In-app chat                             ★ CENTERPIECE 2
@@ -343,44 +344,111 @@ overlay).
 - **Scope guard (still holds, reframed):** re-skin + consistency pass, not a redesign of
   flows. Presentable for P5, foundation for the post-P7 showcase — the backend stays the
   differentiator.
+- **Honest status: ✅ DONE (2026-07-25).** All five build-order steps shipped +
+  device-verified. Backend `image_url` live + prod-synced (metro 345, 1000 imaged events);
+  `mobile/src/theme.ts` (semantic tokens incl. a `destructive` role added during the sweep)
+  + `mobile/src/components/` (`Icon`/`Button`/`Card`/`Chip`/`Avatar`/`Skeleton`); all 7
+  screens on tokens + components with zero `#6200EE` left; skeleton loaders + designed empty
+  states on Feed/My Shows/Taste. Typecheck-clean; committed (mobile-only, not a redeploy).
+  Dark half of every token stays deliberately unfilled → P7.5.
 
-### P4 — Notification pipeline ★ CENTERPIECE 1
+### P4 — Notification pipeline ★ CENTERPIECE 1 *(grilled + locked 2026-07-25)*
 Scheduled background job (Celery beat), not request-driven. This is the resume sentence.
-- [ ] Nightly per-metro: pull → **diff** new events against the `events` cache (clean
-      diff, keyed on `tm_event_id`).
-- [ ] For each genuinely-new relevant event, **compute matched users** and enqueue.
-- [ ] **Digest, don't spray:** collect *all* of a user's new relevant events for the run
-      into **one** notification, never one ping per band. (Deduplication.)
-- [ ] **Idempotency via the `notifications_sent` ledger** (`PK(user_id, event_id)`): run
-      the job twice → second run sends nothing.
-- [ ] **Failure dial = at-least-once with compensating claims.** Claim events with
-      `INSERT ... ON CONFLICT DO NOTHING`, **commit the claim only after the push
-      succeeds**, roll back the claim on send failure. Rationale: for concert alerts a
-      *missed* notification is strictly worse than a rare *duplicate* — bias toward
-      delivery, lean on the ledger + digest to keep dups rare.
-- [ ] **Scope = new events only** for the nightly job. *New relevance* (a user adds an
-      artist whose show was already cached) is handled separately by an **immediate
-      check at add-time**, not the nightly diff.
-- [ ] **Friend-mark ping** *(added 2026-07-02)*: when a user marks **shared**
-      going/maybe, instantly ping their friends **in the event's metro** ("Sam is going
-      to Turnstile Aug 14 — wanna join?"). No taste filter — a friend's real interest
-      outranks the scorer's opinion of the recipient; cross-metro friends see it in-app
-      only (feed strip). Batched: multiple friends marking the same event aggregate
-      into one thread, never one ping per friend. Private marks never fire it.
-- [ ] **Digest lines carry social context** *(added 2026-07-02)*: "New: Turnstile
-      Aug 14 — **Sam is going**." Marked + shared interest only; **never predictions
-      about a third party** (a model guess about Sam doesn't belong in a push to Alex).
-- [ ] **One ledger row per (recipient, event) across BOTH ping kinds** — a friend-mark
-      ping automatically suppresses the digest line for that event and vice versa; no
-      double-touch on the same show.
-- [ ] **No prediction-based pushes** (rejected 2026-07-02): "3 friends might want to
-      join you" pings you about a model guess at exactly the moment the compose sheet
-      already shows it passively. Predictions stay on pull surfaces (card strip,
-      compose sheet). Revisit only if post-P6 predictions earn trust.
-- [ ] **Rate-sanity:** per-metro pulls, aggressive caching, stay under 5k/day.
-- **"I built an idempotent, deduplicated notification pipeline and chose at-least-once
-  delivery because a missed concert alert is worse than a duplicate" is the sentence that
-  lands.**
+**Scope: pipeline only** — travel-willingness infra is its own **P4.5** (below); P4's
+diff-source is written as a **swappable event query** so P4.5 widens it without touching the
+idempotency core. **Two push triggers only: nightly digest + friend-mark ping.** The
+add-time "new-relevance" push is **dropped** — you add the artist while holding the phone and
+the live feed already shows the cached show; a push there is redundant.
+
+**Prod execution model (Path A — real Celery, ~$7/mo):**
+- [ ] One **paid** Render Background Worker running `celery worker -B` (worker + beat in a
+      *single* process, not two), **`--concurrency=1`** so metros sync **sequentially** and the
+      global 5-req/sec ceiling is trivially safe without a distributed limiter. **Redis on
+      Render's free Key Value tier** (transient broker — a restart at most loses an in-flight
+      run the next diff re-derives; idempotent by design). Card's already on file (`cwf-db` is
+      paid). Celery is admittedly **heavier than a nightly cron strictly needs** — chosen
+      deliberately for real broker-backed fan-out + genuine at-least-once semantics to reason
+      about; naming that trade-off is the writeup, not a blind spot.
+- [ ] Beat fires **one nightly orchestrator** (2 AM UTC) → active metros from
+      `SELECT DISTINCT home_metro_id FROM users` (**never hardcoded**; empty set = clean
+      no-op) → enqueues a **per-metro pipeline task** (fan-out; one metro's TM failure can't
+      sink the others).
+
+**The per-metro run:**
+- [ ] **Snapshot** existing `tm_event_id`s for the metro → run `sync_metro` (unchanged **pure
+      upsert**, still shared with the admin endpoint) → **new = fetched − snapshot**, filtered
+      `starts_at > now()`. Snapshot-diff chosen over the `xmax = 0` `RETURNING` trick: reads as
+      plain intent, keeps `sync_metro` single-purpose. **No update-notifications** (a moved
+      date) — new events only.
+- [ ] For each new event, **compute matched users** at the **notification relevance bar**
+      (below), dedupe via the ledger, assemble **one digest per user**, deliver via the outbox.
+
+**Correctness — the transactional outbox (upgraded from naive claim-then-commit):**
+- [ ] **`notifications_sent` gains a `status` column** (`pending`|`sent`). Claim:
+      `INSERT ... ON CONFLICT DO NOTHING` as `pending`, **commit immediately** — no DB
+      transaction held across the Expo network call, no ping↔nightly lock contention on the
+      shared row. Send. Then **commit `status='sent'`**. A row stuck in `pending` (crash
+      between) is **re-sent by a later run** → at-least-once, the "missed concert alert is
+      worse than a duplicate" bias, achieved cleanly. Both trigger kinds use this outbox.
+      (Rejected the locked-but-naive "hold the claim uncommitted until the push succeeds":
+      transaction-across-network + it blocks the friend-mark ping on the same row.)
+- [ ] **One `(recipient, event)` row across BOTH channels** — a friend-mark ping and a digest
+      line **mutually suppress**; first trigger wins; **no debounce window** (the ledger already
+      guarantees "at most one push per event per recipient"; the "Sam *and* Jordan" roster
+      lives on pull surfaces — the feed strip and P7 chat thread).
+
+**Relevance bar (a push is an interruption — deliberately tighter than the feed):**
+- [ ] **Nightly digest = direct artist match only** pre-P6 (favorite/liked tier; its own named
+      threshold in `matching.py`, **stricter** than feed inclusion). Broad **genre-only matches
+      never earn a push** — protects the notification channel's trust. Digest lines carry
+      **marked + shared** social context ("New: Turnstile Aug 14 — **Sam is going**"); **never a
+      third-party prediction** (a model guess about Sam doesn't belong in a push to Alex).
+- [ ] **Friend-mark ping = no taste filter** (a friend's real shared mark outranks the scorer's
+      opinion of the recipient): when a user marks **shared** going/maybe, **enqueue** a ping to
+      their friends **in the event's metro** (mark-interest response returns instantly; private
+      marks enqueue nothing; cross-metro friends see it in-app only via the feed strip).
+- [ ] **No prediction-based pushes** (rejected 2026-07-02): predictions stay on pull surfaces
+      (card strip, compose sheet). Revisit only if post-P6 predictions earn trust.
+
+**P4/P5 boundary — the pipeline is fully testable with no device:**
+- [ ] Build against a **`Notifier` interface + a fail-injectable fake**; **P5** swaps in the real
+      Expo `PushNotifier` with **zero** pipeline changes. **Strict TDD** — the failing-test matrix
+      IS the spec, written before the pipeline: (1) N events → **1** digest; (2) run twice →
+      **silence**; (3) **outbox recovery** — fake *raises* → rows stay `pending`, nothing sent →
+      next run re-sends → `sent` (the crown jewel); (4) **relevance bar** — genre-only → no line,
+      artist → line; (5) **friend-mark ping** — 2 friends → 1 ping, private → none, cross-metro →
+      none; (6) **mutual suppression** — one touch per `(recipient, event)`; (7) **new-events-only**
+      — cached-before-run → no line; (8) **empty run** → clean no-op.
+- [ ] **Rate-sanity:** existing per-fetch throttle (0.2s floor + `Retry-After`/backoff in
+      `ticketmaster.py`) + `concurrency=1` keeps the burst safe; nightly budget ≈ tens of calls,
+      far under 5k/day. **Keep the 1000 deep-paging cap** (date-windowed full coverage → backlog).
+- **"I built an idempotent, deduplicated notification pipeline with a transactional outbox and
+  chose at-least-once delivery because a missed concert alert is worse than a duplicate" is the
+  sentence that lands.**
+
+**Out of scope (explicit):** change-notifications ("show moved"), date-windowed full coverage,
+`notifications_sent` pruning, per-metro-local scheduling, the add-time new-relevance push.
+
+### P4.5 — Travel-willingness / anywhere-sync *(added 2026-07-25)*
+Deferred out of P4 to keep the pipeline centerpiece clean, but placed **immediately after** it
+(not folded into P5's push plumbing or P6's Spotify work) for two reasons: it's *just another
+beat job* while the sync/beat machinery is fresh, and travel changes **what the pipeline
+notifies on** — so it extends the diff as one coherent step instead of a months-later retrofit
+into a pipeline you've forgotten the guts of. (Kevin: "I really want this feature" — hence its
+own early slot, not the backlog.)
+- [ ] **`metros` centroid table** (`metro_id`, `name`, `lat`, `lng`) + the **second cache:
+      per-favorite-artist "anywhere" sync** (`attractionId` pulls), enqueued by the *same*
+      nightly orchestrator from `SELECT DISTINCT artist_id FROM user_artists WHERE weight =
+      favorite`.
+- [ ] **Travel-willingness tier filter** (Local / Regional / Anywhere) over the everywhere-sync,
+      computed from **metro centroids, never user GPS** — fills the P3 scorer's **reserved input
+      slot** (nothing rewrites).
+- [ ] **Pipeline diff-source widens** from "per-metro cache" to "per-metro ∪
+      per-favorite-anywhere": a **new favorite-artist show in another city becomes a premier
+      push** — arguably the best notification the app sends. Friend-mark ping's "event's metro"
+      recipient logic already composes with cross-metro shows.
+- **Precondition:** P4's diff-source was built swappable *exactly* so this is an additive widen,
+  not surgery on the idempotency/outbox core.
 
 ### P5 — Push delivery
 The fiddly plumbing, kept separate from the pipeline so it can't sink the centerpiece.
@@ -498,12 +566,12 @@ those land. This pass re-skins the **feature-complete** app once, coherently.
 |---|---|
 | **Goal** | Live, deployed, impressive backend portfolio piece. Two finished centerpieces. |
 | **Centerpieces** | (1) Notification pipeline, (2) in-app chat. Pipeline first. |
-| **Build order** | Deploy now → P2 → P3 → **P3.5 UI pass** → pipeline → push (+ onboard friends) → Spotify → chat. |
+| **Build order** | Deploy → P2 → P3 → **P3.5 UI pass** (✅) → **pipeline (P4)** → **travel/anywhere-sync (P4.5)** → push (+ onboard friends) → Spotify → chat. |
 | **Artist entry** | TM-first typeahead search, debounced + min-length, **write-through cached** into the local `artists` table. Spotify search not used (lossy mapping would feed *events* = hard fail). |
 | **Genre entry** | Picker from TM taxonomy; pick at genre **or** sub-genre; **sub-genre match scores higher**; match hierarchically (a user's "Rock" matches rock sub-genres). |
 | **Favorite vs liked** | The `user_artists.weight` tier. Triple duty: **travel scope + sync scope + match weight.** |
 | **Event caches (two)** | Per-metro (scheduled, discovery) **+** per-favorite-artist (`attractionId`, "anywhere"). The second is cheap *because* the graph is closed (small favorites set). |
-| **Travel willingness** | A metro-set **filter** (tiers: `Local`/`Regional`/`Anywhere`) over the everywhere-sync, computed from **metro centroids, never user GPS**. **Infra deferred to P4** (no anywhere-sync = no cross-metro events yet); the P3 scorer reserves the input slot. Per-artist override backlogged. |
+| **Travel willingness** | A metro-set **filter** (tiers: `Local`/`Regional`/`Anywhere`) over the everywhere-sync, computed from **metro centroids, never user GPS**. **Infra = its own P4.5** (2026-07-25), right after the pipeline: reuses the beat machinery + widens the diff-source as one coherent step (a favorite playing another city = a premier push). The P3 scorer reserves the input slot; per-artist override backlogged. |
 | **Feed ranking (P3)** | One list: relevance score + **time-proximity boost** (~90-day decay). Chronological order is dead. |
 | **Popularity (P3)** | TM attraction `upcomingEvents` count stored on `artists` at sync = proxy popularity term; **Spotify popularity swaps in at P6**, scorer shape unchanged. |
 | **Taste-set (P3)** | Assembled **in-memory** from `user_artists`+`user_genres`+**interest history** (each mark feeds the event's artist+genre at implicit weight; going > maybe, both below explicit favorites). **Two variants:** friend-visible predictions = explicit picks + shared marks only; own feed = everything incl. private. No `user_taste_artists` until P6, and then **imported Spotify rows only** (no dual-write of explicit picks). |
@@ -518,8 +586,8 @@ those land. This pass re-skins the **feature-complete** app once, coherently.
 | **Friendship lifecycle (P2)** | Decline / cancel / unfriend **delete the row** (re-requestable). **Block = silent full mutual severance**, requester = blocker, blocker-only unblock. |
 | **Authz** | Taste + interest **friends-only** by default. **Private-interest flag** from day one. Match disclosure **symmetric**. |
 | **TDD ramp** | Test-first where behavior is a spec: **P2 authz matrix test-first** (CRUD tests-after) → **P3 scorer strict TDD** → **P4 pipeline strict TDD** (idempotency/digest as failing tests first) → P7 chat logic TDD, WS plumbing manual. |
-| **Pipeline** | Nightly per-metro diff → digest → `notifications_sent` ledger → **at-least-once w/ compensating claims**; **new-events-only** nightly, new-interest at add-time. |
-| **Notify triggers (P4)** | **A + C, no B** (2026-07-02): friend's shared mark → **instant ping to same-metro friends** (no taste filter; batched; private never fires); digest lines carry "Sam is going" (marked+shared only, never third-party predictions). One ledger row per (recipient, event) across both kinds. **No prediction-based pushes** — predictions stay on pull surfaces. |
+| **Pipeline (P4)** | Paid Render worker (`celery worker -B`, `concurrency=1`) + free Redis KV. Nightly orchestrator → per-metro `snapshot-diff → match → digest`. **Transactional outbox** (`notifications_sent.status pending→sent`, claim committed *before* the push, stuck-`pending` re-sent) = **at-least-once** without a txn across the wire. **New-events-only**; **digest = direct artist match only** (tighter than the feed). Tested against a fail-injectable fake `Notifier` (real Expo delivery = P5). |
+| **Notify triggers (P4)** | **Two only** (2026-07-25): (1) nightly **digest** of new artist-matched events; (2) friend's shared mark → **instant enqueued ping to same-metro friends** (no taste filter; private never fires; cross-metro = in-app only). **Add-time new-relevance push dropped** (live feed covers it). Ledger-dedup = one push per `(recipient, event)`, first trigger wins, **no debounce**; digest lines carry "Sam is going" (marked+shared only, never third-party predictions). **No prediction-based pushes.** |
 | **Spotify (P6)** | API wall (Feb 2026): dev mode = **5 allowlisted users**, related-artists/recommendations **dead for new apps**; Extended Quota = registered business w/ 250k MAU (unreachable). **Pluggable import seam**, sources in order: manual picker + interest history (primary) → **Last.fm relay** (capless default: official Spotify→Last.fm scrobble + open API by username, no OAuth) → **GDPR-export upload** (power users, lifetime history) → Spotify OAuth (5 inner-circle). Measured ranking → favorite tier; long-tail/followed/saved → implicit tier; **no playlist scanning v1**. |
 | **Genre discovery / recs** | **Held until P6** — ranked by Spotify popularity + genre overlap (**taste-proximity is dead** with the related-artists endpoint). Pre-P6 feed = high-confidence artist matches only (protect feed trust). |
 
@@ -661,14 +729,18 @@ CREATE TABLE user_taste_artists (
     PRIMARY KEY (user_id, artist_id)
 );
 
--- P4: idempotency ledger so the pipeline never double-notifies. Claimed with
--- ON CONFLICT DO NOTHING; committed after the push succeeds (at-least-once).
--- One row per (recipient, event) across BOTH ping kinds (digest + friend-mark ping) —
--- each automatically suppresses the other for the same event.
+-- P4: transactional-outbox ledger so the pipeline never double-notifies (grilled
+-- 2026-07-25). Claim as status='pending' with ON CONFLICT DO NOTHING and commit
+-- IMMEDIATELY (no txn held across the push); after the push succeeds, commit
+-- status='sent'. A row stuck 'pending' (crash between) is re-sent by a later run =
+-- at-least-once ("a missed concert alert is worse than a duplicate"). One row per
+-- (recipient, event) across BOTH trigger kinds (digest + friend-mark ping) — each
+-- automatically suppresses the other for the same event.
 CREATE TABLE notifications_sent (
     user_id    UUID REFERENCES users(id) ON DELETE CASCADE,
     event_id   UUID REFERENCES events(id) ON DELETE CASCADE,
-    sent_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status     TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent')),
+    sent_at    TIMESTAMPTZ,                    -- NULL until the send succeeds
     PRIMARY KEY (user_id, event_id)
 );
 
