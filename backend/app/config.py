@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 10080  # 7 days
     ticketmaster_api_key: str = ""
     redis_url: str = "redis://localhost:6379/0"
+    # Whether request handlers enqueue Celery jobs (friend-mark pings). Off in tests so
+    # they never touch a broker; on in prod. A broker outage is still swallowed at the
+    # call site so marking interest can't fail on the queue.
+    notifications_enqueue: bool = True
     # Public origin for links we hand out (invite landing pages). Falls back to the
     # request's own base URL when unset, which can be http:// behind Render's proxy.
     public_base_url: str = ""

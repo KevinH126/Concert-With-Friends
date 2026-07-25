@@ -7,7 +7,8 @@ See the P4 section of docs/concert-buddy-build-plan.md for the locked design
 """
 import logging
 from collections import defaultdict
-from typing import Protocol
+from datetime import datetime, timezone
+from typing import Awaitable, Callable, Protocol
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -30,6 +31,19 @@ class Notification:
 
 class Notifier(Protocol):
     async def send(self, notification: Notification) -> None: ...
+
+
+class LogNotifier:
+    """P4's real delivery until P5 wires Expo push — records each notification to the
+    log so the pipeline runs end-to-end in prod with no device. Swapping in the Expo
+    PushNotifier at P5 touches nothing else."""
+
+    async def send(self, notification: Notification) -> None:
+        logger.info(
+            "NOTIFY user=%s kind=%s events=%d %s",
+            notification.user_id, notification.kind,
+            len(notification.event_ids), notification.event_ids,
+        )
 
 
 async def _digest_matches(db: AsyncSession, event_ids: list[str]) -> dict[str, list[str]]:
@@ -153,3 +167,44 @@ async def notify_friend_mark(db: AsyncSession, marker_id: str, event_id: str, no
             logger.warning("Friend-mark ping failed for user %s event %s; left pending", friend_id, event_id)
             continue
         await _mark_sent(db, friend_id, [event_id])
+
+
+async def flush_all_pending(db: AsyncSession, notifier: Notifier) -> None:
+    """Recovery sweep: re-deliver every user's stuck-'pending' rows. Catches rows
+    orphaned by a failed send whose user has no new events in the current run (the
+    per-user digest path would otherwise never revisit them). Run after the nightly
+    fan-out and/or on its own periodic schedule."""
+    rows = await db.execute(
+        select(NotificationSent.user_id).where(NotificationSent.status == "pending").distinct()
+    )
+    for (user_id,) in rows.all():
+        await _flush_pending(db, user_id, notifier)
+
+
+async def run_metro_pipeline(
+    db: AsyncSession,
+    metro_id: str,
+    notifier: Notifier,
+    *,
+    sync: Callable[[str], Awaitable[object]],
+) -> None:
+    """One metro's nightly run: snapshot the cache, sync, then digest only the events
+    that are NEW this run (new = fetched − snapshot). `sync` is injected so the diff is
+    the unit under test; prod passes the real per-metro Ticketmaster sync."""
+    before = {
+        row[0]
+        for row in (
+            await db.execute(select(Event.tm_event_id).where(Event.metro_id == metro_id))
+        ).all()
+    }
+    await sync(metro_id)
+    now = datetime.now(timezone.utc)
+    rows = await db.execute(
+        select(Event.id, Event.tm_event_id, Event.starts_at).where(Event.metro_id == metro_id)
+    )
+    new_event_ids = [
+        event_id
+        for event_id, tm_event_id, starts_at in rows.all()
+        if tm_event_id not in before and (starts_at is None or starts_at > now)
+    ]
+    await notify_new_events(db, new_event_ids, notifier)

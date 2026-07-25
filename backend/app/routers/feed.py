@@ -11,6 +11,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models import Event, EventInterest, User
 from app.services import social
+from app.services.tasks import enqueue_friend_mark_ping
 from app.services.matching import (
     EventFacts,
     ScoringCtx,
@@ -296,6 +297,11 @@ async def set_interest(
         ))
 
     await db.commit()
+
+    # A shared mark instantly pings same-metro friends (P4). Private marks never fire it.
+    if body.visibility == "shared":
+        enqueue_friend_mark_ping(str(current_user.id), event_id)
+
     return {"event_id": event_id, "level": body.level, "visibility": body.visibility}
 
 

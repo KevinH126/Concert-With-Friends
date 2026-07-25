@@ -16,7 +16,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.models import Artist, Event, EventInterest, UserArtist, UserGenre
-from app.services.notifications import Notification, notify_friend_mark, notify_new_events
+from app.services.notifications import (
+    Notification, flush_all_pending, notify_friend_mark, notify_new_events, run_metro_pipeline,
+)
 from tests.conftest import befriend, create_user
 
 
@@ -209,3 +211,40 @@ async def test_empty_run_is_a_clean_no_op(db_session):
     notifier = FakeNotifier()
     await notify_new_events(db_session, [], notifier)
     assert notifier.sent == []
+
+
+async def test_pipeline_only_notifies_events_new_since_the_snapshot(client, db_session):
+    """The per-metro run snapshots the cache, syncs, and notifies only events that
+    appeared THIS run — a show already cached before the run is never re-notified."""
+    user_id, _ = await create_user(client, "alice", metro="345")
+    artist_id = await _add_favorite(db_session, user_id, name="Turnstile")
+    await _event(db_session, artist_id, metro="345", name="Already cached")  # pre-existing
+
+    new_id = {}
+
+    async def fake_sync(metro_id):
+        assert metro_id == "345"
+        new_id["value"] = await _event(db_session, artist_id, metro="345", name="Just announced")
+
+    notifier = FakeNotifier()
+    await run_metro_pipeline(db_session, "345", notifier, sync=fake_sync)
+
+    assert len(notifier.sent) == 1
+    assert set(notifier.sent[0].event_ids) == {new_id["value"]}
+
+
+async def test_pending_sweep_recovers_orphaned_rows(client, db_session):
+    """A stuck-pending row for a user with no new events this run is still recovered by
+    the sweep — not only by the per-user digest path that touched them."""
+    user_id, _ = await create_user(client, "alice", metro="345")
+    artist_id = await _add_favorite(db_session, user_id, name="Turnstile")
+    e1 = await _event(db_session, artist_id, metro="345")
+
+    failing = FakeNotifier(fail=True)
+    await notify_new_events(db_session, [e1], failing)  # send fails → row left pending
+    assert failing.sent == []
+
+    ok = FakeNotifier()
+    await flush_all_pending(db_session, ok)  # a later sweep with no new events
+    assert len(ok.sent) == 1
+    assert set(ok.sent[0].event_ids) == {e1}

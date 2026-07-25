@@ -15,6 +15,7 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 os.environ.setdefault("ADMIN_TOKEN", "test-admin-token")
 os.environ["TICKETMASTER_API_KEY"] = ""  # force stub mode; tests never call TM
+os.environ["NOTIFICATIONS_ENQUEUE"] = "false"  # tests never enqueue to a broker
 
 import psycopg2
 import pytest
