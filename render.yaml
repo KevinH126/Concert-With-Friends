@@ -83,5 +83,6 @@ services:
   # re-derives (idempotent by design). VERIFY the free plan slug/size in the dashboard.
   - type: redis
     name: cwf-redis
+    region: virginia # MUST match the worker/db — cross-region private DNS won't resolve
     plan: free
     ipAllowList: [] # reachable only from within the Render private network
