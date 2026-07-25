@@ -184,11 +184,22 @@ class EventInterest(Base):
 
 
 class NotificationSent(Base):
+    """P4 transactional-outbox ledger. A row is claimed 'pending' (committed before the
+    push), then flipped to 'sent' after delivery succeeds. A row stuck 'pending' (a send
+    that failed or crashed) is re-sent by a later run — at-least-once, without holding a
+    DB transaction across the push. One row per (recipient, event) across BOTH trigger
+    kinds (digest + friend-mark ping), so each suppresses the other for the same event."""
+
     __tablename__ = "notifications_sent"
 
     user_id = Column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     event_id = Column(UUID(as_uuid=False), ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
-    sent_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    status = Column(Text, nullable=False, default="pending", server_default="pending")
+    sent_at = Column(DateTime(timezone=True), nullable=True)  # NULL until the send succeeds
+
+    __table_args__ = (
+        CheckConstraint("status IN ('pending','sent')", name="ck_notifications_sent_status"),
+    )
 
 
 class DeviceToken(Base):
