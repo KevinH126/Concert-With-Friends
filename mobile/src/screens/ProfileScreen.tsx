@@ -5,8 +5,11 @@ import {
 } from 'react-native';
 import { updateProfile } from '../api/auth';
 import { useAuth } from '../context/AuthContext';
+import { Button } from '../components';
+import { radii, spacing, type as typeScale, useTheme } from '../theme';
 
 export default function ProfileScreen() {
+  const { colors } = useTheme();
   const { user, refresh, logout } = useAuth();
   const [metroId, setMetroId] = useState(user?.home_metro_id ?? '');
   const [username, setUsername] = useState(user?.username ?? '');
@@ -50,69 +53,70 @@ export default function ProfileScreen() {
     }
   };
 
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.separator, color: colors.label, backgroundColor: colors.surface },
+  ];
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.name}>{user?.display_name}</Text>
-      {user?.username && <Text style={styles.usernameLine}>@{user.username}</Text>}
-      <Text style={styles.email}>{user?.email}</Text>
+    <ScrollView contentContainerStyle={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.name, { color: colors.label }]}>{user?.display_name}</Text>
+      {user?.username && <Text style={[styles.usernameLine, { color: colors.accent }]}>@{user.username}</Text>}
+      <Text style={[styles.email, { color: colors.labelSecondary }]}>{user?.email}</Text>
 
       <View style={styles.section}>
-        <Text style={styles.label}>Username</Text>
-        <Text style={styles.hint}>How friends find you in search. Lowercase letters, numbers, underscores.</Text>
+        <Text style={[styles.label, { color: colors.label }]}>Username</Text>
+        <Text style={[styles.hint, { color: colors.labelTertiary }]}>
+          How friends find you in search. Lowercase letters, numbers, underscores.
+        </Text>
         <TextInput
-          style={styles.input}
+          style={inputStyle}
           value={username}
           onChangeText={(t) => setUsername(t.toLowerCase())}
           placeholder="e.g. kevin_h"
+          placeholderTextColor={colors.labelTertiary}
           autoCapitalize="none"
           autoCorrect={false}
         />
-        <TouchableOpacity style={styles.button} onPress={saveUsername} disabled={saving}>
-          <Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save username'}</Text>
-        </TouchableOpacity>
+        <Button title="Save username" onPress={saveUsername} loading={saving} />
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.label}>Home Metro (Ticketmaster DMA ID)</Text>
-        <Text style={styles.hint}>
+        <Text style={[styles.label, { color: colors.label }]}>Home Metro (Ticketmaster DMA ID)</Text>
+        <Text style={[styles.hint, { color: colors.labelTertiary }]}>
           Find your metro ID at ticketmaster.com/discovery/v2/dmas.json
         </Text>
         <TextInput
-          style={styles.input}
+          style={inputStyle}
           value={metroId}
           onChangeText={setMetroId}
           placeholder="e.g. 286 for Los Angeles"
+          placeholderTextColor={colors.labelTertiary}
           keyboardType="numeric"
         />
-        <TouchableOpacity style={styles.button} onPress={saveMetro} disabled={saving}>
-          <Text style={styles.buttonText}>{saving ? 'Saving…' : 'Save'}</Text>
-        </TouchableOpacity>
+        <Button title="Save" onPress={saveMetro} loading={saving} />
       </View>
 
       <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
-        <Text style={styles.logoutText}>Sign out</Text>
+        <Text style={[styles.logoutText, { color: colors.maybe }]}>Sign out</Text>
       </TouchableOpacity>
     </ScrollView>
   );
 }
 
+// Layout/metrics only — colors come from the theme at render time.
 const styles = StyleSheet.create({
-  container: { padding: 24, backgroundColor: '#fff', flexGrow: 1 },
-  name: { fontSize: 24, fontWeight: '700' },
-  usernameLine: { fontSize: 15, color: '#6200EE', marginTop: 2 },
-  email: { fontSize: 14, color: '#666', marginBottom: 32 },
-  section: { marginBottom: 24 },
-  label: { fontSize: 15, fontWeight: '600', marginBottom: 4 },
-  hint: { fontSize: 12, color: '#888', marginBottom: 8 },
+  container: { padding: spacing.xl, flexGrow: 1 },
+  name: { ...typeScale.title, fontSize: 24 },
+  usernameLine: { ...typeScale.body, marginTop: 2 },
+  email: { ...typeScale.callout, marginBottom: spacing.xxl },
+  section: { marginBottom: spacing.xl },
+  label: { ...typeScale.headline, marginBottom: spacing.xs },
+  hint: { ...typeScale.caption, marginBottom: spacing.sm },
   input: {
-    borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
-    padding: 10, fontSize: 15, marginBottom: 10,
+    borderWidth: 1, borderRadius: radii.sm,
+    padding: spacing.md, fontSize: 15, marginBottom: spacing.md,
   },
-  button: {
-    backgroundColor: '#6200EE', borderRadius: 8,
-    padding: 12, alignItems: 'center',
-  },
-  buttonText: { color: '#fff', fontWeight: '600' },
-  logoutBtn: { marginTop: 'auto', padding: 12, alignItems: 'center' },
-  logoutText: { color: '#d32f2f', fontSize: 15 },
+  logoutBtn: { marginTop: 'auto', padding: spacing.md, alignItems: 'center' },
+  logoutText: { ...typeScale.body, fontSize: 15 },
 });

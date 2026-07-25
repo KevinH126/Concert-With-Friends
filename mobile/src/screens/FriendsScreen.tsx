@@ -11,8 +11,11 @@ import {
   searchUsers, sendRequest,
 } from '../api/friends';
 import { Invite, createInvite, redeemInvite } from '../api/invites';
+import { Avatar, Button, Icon } from '../components';
+import { radii, spacing, type as typeScale, useTheme } from '../theme';
 
 export default function FriendsScreen() {
+  const { colors } = useTheme();
   const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
   const [friends, setFriends] = useState<FriendUser[]>([]);
@@ -122,121 +125,146 @@ export default function FriendsScreen() {
 
   const actionLabel: Record<SearchResult['friendship_status'], string> = {
     none: 'Add',
-    pending_out: 'Requested ×',
+    pending_out: 'Requested',
     pending_in: 'Accept',
-    friends: 'Friends ✓',
+    friends: 'Friends',
+  };
+
+  // A compact pill action on a person row. Filled accent = primary action; muted = settled.
+  const SmallAction = ({ label, filled, muted, onPress }: {
+    label: string; filled?: boolean; muted?: boolean; onPress: () => void;
+  }) => (
+    <TouchableOpacity
+      style={[
+        styles.smallBtn,
+        filled && { backgroundColor: colors.accent },
+        !filled && { borderWidth: 1, borderColor: muted ? colors.separator : colors.accent },
+      ]}
+      onPress={onPress}
+      disabled={muted}
+    >
+      <Text style={[
+        styles.smallBtnText,
+        { color: filled ? colors.onAccent : muted ? colors.labelSecondary : colors.accent },
+      ]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+
+  // A person row: avatar + name/username + trailing content (actions or chevron).
+  const PersonRow = ({ name, username, onPress, children }: {
+    name: string; username?: string | null; onPress?: () => void; children?: React.ReactNode;
+  }) => {
+    const body = (
+      <>
+        <Avatar name={name} size={40} />
+        <View style={styles.rowText}>
+          <Text style={[styles.name, { color: colors.label }]}>{name}</Text>
+          {username && <Text style={[styles.username, { color: colors.labelSecondary }]}>@{username}</Text>}
+        </View>
+        {children}
+      </>
+    );
+    if (onPress) {
+      return (
+        <TouchableOpacity style={[styles.row, { backgroundColor: colors.surface }]} onPress={onPress}>
+          {body}
+        </TouchableOpacity>
+      );
+    }
+    return <View style={[styles.row, { backgroundColor: colors.surface }]}>{body}</View>;
   };
 
   if (loading) {
-    return <ActivityIndicator style={styles.center} size="large" color="#6200EE" />;
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </View>
+    );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView
+      style={{ backgroundColor: colors.background }}
+      contentContainerStyle={styles.container}
+    >
       <View style={styles.actionRow}>
-        <TouchableOpacity style={styles.primaryBtn} onPress={openInvite} disabled={busy}>
-          <Text style={styles.primaryBtnText}>Invite friends</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => setRedeemVisible(true)}>
-          <Text style={styles.secondaryBtnText}>Enter invite code</Text>
-        </TouchableOpacity>
+        <Button title="Invite friends" onPress={openInvite} disabled={busy} style={{ flex: 1 }} />
+        <Button title="Enter code" variant="secondary" onPress={() => setRedeemVisible(true)} style={{ flex: 1 }} />
       </View>
 
-      <TextInput
-        style={styles.search}
-        placeholder="Search by username (3+ letters)"
-        value={query}
-        onChangeText={runSearch}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      {searching && <ActivityIndicator size="small" color="#6200EE" />}
+      <View style={[styles.search, { borderColor: colors.separator, backgroundColor: colors.surface }]}>
+        <Icon name="search" size={17} color={colors.labelTertiary} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.label }]}
+          placeholder="Search by username (3+ letters)"
+          placeholderTextColor={colors.labelTertiary}
+          value={query}
+          onChangeText={runSearch}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+      </View>
+      {searching && <ActivityIndicator size="small" color={colors.accent} style={{ marginBottom: spacing.sm }} />}
       {results.map((r) => (
-        <View key={r.id} style={styles.row}>
-          <View style={styles.rowText}>
-            <Text style={styles.name}>{r.display_name}</Text>
-            <Text style={styles.username}>@{r.username}</Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.smallBtn, r.friendship_status === 'friends' && styles.smallBtnMuted]}
+        <PersonRow key={r.id} name={r.display_name} username={r.username}>
+          <SmallAction
+            label={actionLabel[r.friendship_status]}
+            filled={r.friendship_status === 'none' || r.friendship_status === 'pending_in'}
+            muted={r.friendship_status === 'friends' || r.friendship_status === 'pending_out'}
             onPress={() => onSearchAction(r)}
-          >
-            <Text style={styles.smallBtnText}>{actionLabel[r.friendship_status]}</Text>
-          </TouchableOpacity>
-        </View>
+          />
+        </PersonRow>
       ))}
 
       {requests.incoming.length > 0 && (
         <>
-          <Text style={styles.section}>Friend requests</Text>
+          <Text style={[styles.section, { color: colors.labelSecondary }]}>Friend requests</Text>
           {requests.incoming.map((u) => (
-            <View key={u.id} style={styles.row}>
-              <View style={styles.rowText}>
-                <Text style={styles.name}>{u.display_name}</Text>
-                {u.username && <Text style={styles.username}>@{u.username}</Text>}
-              </View>
-              <TouchableOpacity
-                style={styles.smallBtn}
-                onPress={async () => { await acceptRequest(u.id); await load(); }}
-              >
-                <Text style={styles.smallBtnText}>Accept</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.smallBtnOutline}
-                onPress={async () => { await declineOrCancelRequest(u.id); await load(); }}
-              >
-                <Text style={styles.smallBtnOutlineText}>Decline</Text>
-              </TouchableOpacity>
-            </View>
+            <PersonRow key={u.id} name={u.display_name} username={u.username}>
+              <SmallAction label="Accept" filled onPress={async () => { await acceptRequest(u.id); await load(); }} />
+              <SmallAction label="Decline" muted onPress={async () => { await declineOrCancelRequest(u.id); await load(); }} />
+            </PersonRow>
           ))}
         </>
       )}
 
       {requests.outgoing.length > 0 && (
         <>
-          <Text style={styles.section}>Sent requests</Text>
+          <Text style={[styles.section, { color: colors.labelSecondary }]}>Sent requests</Text>
           {requests.outgoing.map((u) => (
-            <View key={u.id} style={styles.row}>
-              <View style={styles.rowText}>
-                <Text style={styles.name}>{u.display_name}</Text>
-                {u.username && <Text style={styles.username}>@{u.username}</Text>}
-              </View>
-              <TouchableOpacity
-                style={styles.smallBtnOutline}
-                onPress={async () => { await declineOrCancelRequest(u.id); await load(); }}
-              >
-                <Text style={styles.smallBtnOutlineText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
+            <PersonRow key={u.id} name={u.display_name} username={u.username}>
+              <SmallAction label="Cancel" muted onPress={async () => { await declineOrCancelRequest(u.id); await load(); }} />
+            </PersonRow>
           ))}
         </>
       )}
 
-      <Text style={styles.section}>Friends</Text>
+      <Text style={[styles.section, { color: colors.labelSecondary }]}>Friends</Text>
       {friends.length === 0 ? (
-        <Text style={styles.empty}>No friends yet. Send an invite to get started!</Text>
+        <Text style={[styles.empty, { color: colors.labelSecondary }]}>
+          No friends yet. Send an invite to get started!
+        </Text>
       ) : (
         friends.map((u) => (
-          <TouchableOpacity
+          <PersonRow
             key={u.id}
-            style={styles.row}
+            name={u.display_name}
+            username={u.username}
             onPress={() => navigation.navigate('FriendProfile', { userId: u.id, displayName: u.display_name })}
           >
-            <View style={styles.rowText}>
-              <Text style={styles.name}>{u.display_name}</Text>
-              {u.username && <Text style={styles.username}>@{u.username}</Text>}
-            </View>
-            <Text style={styles.chevron}>{'›'}</Text>
-          </TouchableOpacity>
+            <Icon name="chevronRight" size={18} color={colors.labelTertiary} />
+          </PersonRow>
         ))
       )}
 
       {/* Invite modal: the QR is just the landing-page URL rendered */}
       <Modal visible={inviteVisible} transparent animationType="slide" onRequestClose={() => setInviteVisible(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Invite your friends</Text>
-            <Text style={styles.modalSub}>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.label }]}>Invite your friends</Text>
+            <Text style={[styles.modalSub, { color: colors.labelSecondary }]}>
               Share the link, or have a friend scan this QR. The code works for up to{' '}
               {invite?.max_uses ?? 25} friends for 7 days.
             </Text>
@@ -245,12 +273,10 @@ export default function FriendsScreen() {
                 <QRCode value={invite.url} size={180} />
               </View>
             )}
-            <Text style={styles.code}>{invite?.token}</Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={shareInvite}>
-              <Text style={styles.primaryBtnText}>Share link</Text>
-            </TouchableOpacity>
+            <Text style={[styles.code, { color: colors.label }]}>{invite?.token}</Text>
+            <Button title="Share link" onPress={shareInvite} icon="share" />
             <TouchableOpacity onPress={() => setInviteVisible(false)}>
-              <Text style={styles.modalClose}>Close</Text>
+              <Text style={[styles.modalClose, { color: colors.accent }]}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -259,22 +285,25 @@ export default function FriendsScreen() {
       {/* Redeem modal */}
       <Modal visible={redeemVisible} transparent animationType="slide" onRequestClose={() => setRedeemVisible(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Enter invite code</Text>
-            <Text style={styles.modalSub}>Paste the code (or the whole link) your friend sent you.</Text>
-            <TextInput
-              style={styles.search}
-              placeholder="e.g. k7x2m9qp4a"
-              value={code}
-              onChangeText={setCode}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <TouchableOpacity style={styles.primaryBtn} onPress={submitCode} disabled={busy}>
-              {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>Redeem</Text>}
-            </TouchableOpacity>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.label }]}>Enter invite code</Text>
+            <Text style={[styles.modalSub, { color: colors.labelSecondary }]}>
+              Paste the code (or the whole link) your friend sent you.
+            </Text>
+            <View style={[styles.search, { borderColor: colors.separator, backgroundColor: colors.background }]}>
+              <TextInput
+                style={[styles.searchInput, { color: colors.label }]}
+                placeholder="e.g. k7x2m9qp4a"
+                placeholderTextColor={colors.labelTertiary}
+                value={code}
+                onChangeText={setCode}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            <Button title="Redeem" onPress={submitCode} loading={busy} />
             <TouchableOpacity onPress={() => { setRedeemVisible(false); setCode(''); }}>
-              <Text style={styles.modalClose}>Cancel</Text>
+              <Text style={[styles.modalClose, { color: colors.accent }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -283,44 +312,36 @@ export default function FriendsScreen() {
   );
 }
 
+// Layout/metrics only — colors come from the theme at render time.
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  container: { padding: 16 },
-  actionRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  primaryBtn: {
-    flex: 1, backgroundColor: '#6200EE', borderRadius: 8,
-    padding: 12, alignItems: 'center',
-  },
-  primaryBtnText: { color: '#fff', fontWeight: '600' },
-  secondaryBtn: {
-    flex: 1, borderWidth: 1, borderColor: '#6200EE', borderRadius: 8,
-    padding: 12, alignItems: 'center',
-  },
-  secondaryBtnText: { color: '#6200EE', fontWeight: '600' },
+  container: { padding: spacing.lg },
+  actionRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.lg },
   search: {
-    borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
-    padding: 12, marginBottom: 12, fontSize: 16,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    borderWidth: 1, borderRadius: radii.md, paddingHorizontal: spacing.md,
+    height: 44, marginBottom: spacing.md,
   },
-  section: { fontSize: 13, fontWeight: '700', color: '#888', textTransform: 'uppercase', marginTop: 20, marginBottom: 8 },
+  searchInput: { flex: 1, ...typeScale.body, fontSize: 16 },
+  section: {
+    ...typeScale.caption, fontWeight: '700', textTransform: 'uppercase',
+    marginTop: spacing.xl, marginBottom: spacing.sm,
+  },
   row: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#fff', borderRadius: 10, padding: 12, marginBottom: 8,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    borderRadius: radii.md, padding: spacing.md, marginBottom: spacing.sm,
   },
   rowText: { flex: 1 },
-  name: { fontSize: 16, fontWeight: '500' },
-  username: { fontSize: 13, color: '#888' },
-  chevron: { fontSize: 22, color: '#bbb' },
-  smallBtn: { backgroundColor: '#6200EE', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 },
-  smallBtnMuted: { backgroundColor: '#9e9e9e' },
-  smallBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
-  smallBtnOutline: { borderWidth: 1, borderColor: '#bbb', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6 },
-  smallBtnOutlineText: { color: '#666', fontWeight: '600', fontSize: 13 },
-  empty: { color: '#888', fontSize: 14 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: 24 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 24, alignItems: 'stretch' },
-  modalTitle: { fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 8 },
-  modalSub: { fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 16 },
-  qrWrap: { alignItems: 'center', marginBottom: 12 },
-  code: { fontSize: 24, fontWeight: '700', letterSpacing: 3, textAlign: 'center', marginBottom: 16 },
-  modalClose: { color: '#6200EE', textAlign: 'center', marginTop: 14, fontWeight: '600' },
+  name: { ...typeScale.headline, fontWeight: '500' },
+  username: { ...typeScale.callout },
+  smallBtn: { borderRadius: radii.sm, paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 2 },
+  smallBtnText: { ...typeScale.caption, fontWeight: '600' },
+  empty: { ...typeScale.body },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: spacing.xl },
+  modalCard: { borderRadius: 16, padding: spacing.xl, gap: spacing.md },
+  modalTitle: { ...typeScale.title, fontSize: 20, textAlign: 'center' },
+  modalSub: { ...typeScale.body, textAlign: 'center' },
+  qrWrap: { alignItems: 'center' },
+  code: { fontSize: 24, fontWeight: '700', letterSpacing: 3, textAlign: 'center' },
+  modalClose: { ...typeScale.headline, textAlign: 'center', marginTop: spacing.xs },
 });

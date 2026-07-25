@@ -28,6 +28,9 @@ const light = {
   going: '#34C759', // system green
   maybe: '#FF9500', // system orange
   onStatus: '#FFFFFF',
+
+  // Destructive actions (remove mark, unfriend, block) — system red, never the accent
+  destructive: '#FF3B30',
 };
 
 type Palette = typeof light;

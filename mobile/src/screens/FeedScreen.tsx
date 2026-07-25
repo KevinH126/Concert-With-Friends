@@ -9,7 +9,7 @@ import {
   FeedEvent, FriendGoing, FriendPredicted, getFeed, removeInterest, setInterest,
 } from '../api/feed';
 import { EventSearchResult, searchEvents } from '../api/events';
-import { Avatar, Card, Chip, Icon, IconName } from '../components';
+import { Avatar, Card, Chip, FeedCardSkeleton, Icon, IconName } from '../components';
 import { radii, spacing, type as typeScale, useTheme } from '../theme';
 
 function joinNames(names: string[]): string {
@@ -210,22 +210,6 @@ export default function FeedScreen() {
     );
   };
 
-  if (loading) {
-    return <ActivityIndicator style={styles.center} size="large" color={colors.accent} />;
-  }
-
-  if (needsMetro) {
-    return (
-      <View style={[styles.container, styles.center, { backgroundColor: colors.background }]}>
-        <Icon name="search" size={40} color={colors.labelTertiary} />
-        <Text style={[styles.empty, { color: colors.label }]}>Set your home metro to see shows.</Text>
-        <Text style={[styles.emptySub, { color: colors.labelSecondary }]}>
-          Go to the Profile tab and enter your metro ID.
-        </Text>
-      </View>
-    );
-  }
-
   const searchBar = (
     <View style={[styles.searchField, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
       <Icon name="search" size={17} color={colors.labelTertiary} />
@@ -240,6 +224,30 @@ export default function FeedScreen() {
       />
     </View>
   );
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.searchWrap}>{searchBar}</View>
+        <View style={styles.list}>
+          <FeedCardSkeleton />
+          <FeedCardSkeleton />
+        </View>
+      </View>
+    );
+  }
+
+  if (needsMetro) {
+    return (
+      <View style={[styles.container, styles.center, { backgroundColor: colors.background }]}>
+        <Icon name="search" size={40} color={colors.labelTertiary} />
+        <Text style={[styles.empty, { color: colors.label }]}>Set your home metro to see shows.</Text>
+        <Text style={[styles.emptySub, { color: colors.labelSecondary }]}>
+          Go to the Profile tab and enter your metro ID.
+        </Text>
+      </View>
+    );
+  }
 
   // Search-result card: same hero + core info, simpler actions (no private, no social).
   if (results !== null) {

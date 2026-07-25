@@ -37,8 +37,15 @@ the DB's *external* connection string (Render dashboard → `cwf-db` → "Extern
 Database URL"):
 
 ```bash
+# bash / Git Bash:
 cd backend
 DATABASE_URL="<external-connection-string>" ../.venv/Scripts/python.exe -m alembic upgrade head
+```
+
+```powershell
+# PowerShell (inline VAR=value is a bash-ism and errors here):
+cd backend
+$env:DATABASE_URL="<external-connection-string>"; ../.venv/Scripts/python.exe -m alembic upgrade head
 ```
 
 The app normalizes the driver, so a plain `postgresql://...` URL is fine.
@@ -53,6 +60,9 @@ No scheduled sync until P4, so populate events manually per demo metro:
 curl -X POST "https://<your-service>.onrender.com/admin/sync/{metro_id}" \
   -H "X-Admin-Token: <ADMIN_TOKEN from Render dashboard>"
 ```
+
+On PowerShell, call real `curl.exe` (the `curl` alias is `Invoke-WebRequest` with
+different flags): `curl.exe -X POST "..." -H "X-Admin-Token: ..."`.
 
 ## Go-public checklist
 

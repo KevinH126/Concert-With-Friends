@@ -73,3 +73,6 @@ logs/
 celerybeat-schedule
 celerybeat-schedule.*
 celerybeat.pid
+
+# Cygwin/Git-Bash crash artifacts
+*.stackdump

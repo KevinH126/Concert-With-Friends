@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import {
-  ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
+  Alert, KeyboardAvoidingView, Platform,
   StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { login, signup } from '../api/auth';
 import { useAuth } from '../context/AuthContext';
+import { Button } from '../components';
+import { radii, spacing, type as typeScale, useTheme } from '../theme';
 
 export default function LoginScreen() {
+  const { colors } = useTheme();
   const { refresh } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
@@ -41,23 +44,35 @@ export default function LoginScreen() {
     }
   };
 
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.separator, color: colors.label, backgroundColor: colors.surface },
+  ];
+
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-      <Text style={styles.title}>Concert With Friends</Text>
-      <Text style={styles.subtitle}>{mode === 'login' ? 'Sign in' : 'Create account'}</Text>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
+      <Text style={[styles.title, { color: colors.label }]}>Concert With Friends</Text>
+      <Text style={[styles.subtitle, { color: colors.labelSecondary }]}>
+        {mode === 'login' ? 'Sign in' : 'Create account'}
+      </Text>
 
       {mode === 'signup' && (
         <>
           <TextInput
-            style={styles.input}
+            style={inputStyle}
             placeholder="Display name"
+            placeholderTextColor={colors.labelTertiary}
             value={displayName}
             onChangeText={setDisplayName}
             autoCapitalize="words"
           />
           <TextInput
-            style={styles.input}
+            style={inputStyle}
             placeholder="Username (lowercase, for friends to find you)"
+            placeholderTextColor={colors.labelTertiary}
             value={username}
             onChangeText={(t) => setUsername(t.toLowerCase())}
             autoCapitalize="none"
@@ -66,27 +81,32 @@ export default function LoginScreen() {
         </>
       )}
       <TextInput
-        style={styles.input}
+        style={inputStyle}
         placeholder="Email"
+        placeholderTextColor={colors.labelTertiary}
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
       />
       <TextInput
-        style={styles.input}
+        style={inputStyle}
         placeholder="Password"
+        placeholderTextColor={colors.labelTertiary}
         value={password}
         onChangeText={setPassword}
         secureTextEntry
       />
 
-      <TouchableOpacity style={styles.button} onPress={submit} disabled={loading}>
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{mode === 'login' ? 'Sign in' : 'Sign up'}</Text>}
-      </TouchableOpacity>
+      <Button
+        title={mode === 'login' ? 'Sign in' : 'Sign up'}
+        onPress={submit}
+        loading={loading}
+        style={{ marginTop: spacing.sm }}
+      />
 
       <TouchableOpacity onPress={() => setMode(mode === 'login' ? 'signup' : 'login')}>
-        <Text style={styles.toggle}>
+        <Text style={[styles.toggle, { color: colors.accent }]}>
           {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
         </Text>
       </TouchableOpacity>
@@ -94,18 +114,14 @@ export default function LoginScreen() {
   );
 }
 
+// Layout/metrics only — colors come from the theme at render time.
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#fff' },
-  title: { fontSize: 28, fontWeight: '700', textAlign: 'center', marginBottom: 4 },
-  subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 32 },
+  container: { flex: 1, justifyContent: 'center', padding: spacing.xl },
+  title: { fontSize: 28, fontWeight: '700', textAlign: 'center', marginBottom: spacing.xs },
+  subtitle: { ...typeScale.body, fontSize: 16, textAlign: 'center', marginBottom: spacing.xxl },
   input: {
-    borderWidth: 1, borderColor: '#ddd', borderRadius: 8,
-    padding: 12, marginBottom: 12, fontSize: 16,
+    borderWidth: 1, borderRadius: radii.sm,
+    padding: spacing.md, marginBottom: spacing.md, fontSize: 16,
   },
-  button: {
-    backgroundColor: '#6200EE', borderRadius: 8,
-    padding: 14, alignItems: 'center', marginTop: 8,
-  },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  toggle: { color: '#6200EE', textAlign: 'center', marginTop: 16 },
+  toggle: { ...typeScale.callout, textAlign: 'center', marginTop: spacing.lg },
 });

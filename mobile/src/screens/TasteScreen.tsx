@@ -7,6 +7,8 @@ import {
   Artist, TaxonomyGenre, addArtist, addGenre, getGenreTaxonomy,
   getMyArtists, getMyGenres, removeArtist, removeGenre,
 } from '../api/artists';
+import { Button, Chip, Icon, Skeleton } from '../components';
+import { radii, spacing, type as typeScale, useTheme } from '../theme';
 
 // Genres come from the TM taxonomy picker only — the API rejects free text.
 // Tapping toggles: unpicked adds, picked (✓) removes.
@@ -16,6 +18,7 @@ function GenrePickerModal({ visible, onClose, myGenres, onToggle }: {
   myGenres: string[];
   onToggle: (genre: string) => void;
 }) {
+  const { colors } = useTheme();
   const [taxonomy, setTaxonomy] = useState<TaxonomyGenre[] | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -44,33 +47,41 @@ function GenrePickerModal({ visible, onClose, myGenres, onToggle }: {
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={pickerStyles.container}>
+      <View style={[pickerStyles.container, { backgroundColor: colors.background }]}>
         <View style={pickerStyles.header}>
-          <Text style={pickerStyles.title}>Pick genres</Text>
+          <Text style={[pickerStyles.title, { color: colors.label }]}>Pick genres</Text>
           <TouchableOpacity onPress={onClose}>
-            <Text style={pickerStyles.done}>Done</Text>
+            <Text style={[pickerStyles.done, { color: colors.accent }]}>Done</Text>
           </TouchableOpacity>
         </View>
         {taxonomy === null ? (
-          <ActivityIndicator style={{ marginTop: 40 }} size="large" color="#6200EE" />
+          <ActivityIndicator style={{ marginTop: spacing.xxl }} size="large" color={colors.accent} />
         ) : (
           <SectionList
             sections={sections}
             keyExtractor={(item) => item}
             renderSectionHeader={({ section }) => (
-              <View style={pickerStyles.genreRow}>
+              <View style={[pickerStyles.genreRow, { borderBottomColor: colors.separator, backgroundColor: colors.background }]}>
                 <TouchableOpacity
                   style={pickerStyles.genreName}
                   onPress={() => onToggle(section.title)}
                 >
-                  <Text style={[pickerStyles.genreText, picked(section.title) && pickerStyles.pickedText]}>
-                    {section.title}{picked(section.title) ? ' ✓' : ''}
-                  </Text>
+                  <View style={pickerStyles.pickedLine}>
+                    <Text style={[
+                      pickerStyles.genreText,
+                      { color: picked(section.title) ? colors.accent : colors.label },
+                    ]}>
+                      {section.title}
+                    </Text>
+                    {picked(section.title) && <Icon name="check" size={14} color={colors.accent} />}
+                  </View>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => toggleExpanded(section.title)} hitSlop={12}>
-                  <Text style={pickerStyles.expand}>
-                    {expanded.has(section.title) ? '▾' : '▸'}
-                  </Text>
+                  <Icon
+                    name={expanded.has(section.title) ? 'chevronDown' : 'chevronRight'}
+                    size={16}
+                    color={colors.labelSecondary}
+                  />
                 </TouchableOpacity>
               </View>
             )}
@@ -79,9 +90,15 @@ function GenrePickerModal({ visible, onClose, myGenres, onToggle }: {
                 style={pickerStyles.subgenreRow}
                 onPress={() => onToggle(item)}
               >
-                <Text style={[pickerStyles.subgenreText, picked(item) && pickerStyles.pickedText]}>
-                  {item}{picked(item) ? ' ✓' : ''}
-                </Text>
+                <View style={pickerStyles.pickedLine}>
+                  <Text style={[
+                    pickerStyles.subgenreText,
+                    { color: picked(item) ? colors.accent : colors.labelSecondary },
+                  ]}>
+                    {item}
+                  </Text>
+                  {picked(item) && <Icon name="check" size={13} color={colors.accent} />}
+                </View>
               </TouchableOpacity>
             )}
             stickySectionHeadersEnabled={false}
@@ -93,6 +110,7 @@ function GenrePickerModal({ visible, onClose, myGenres, onToggle }: {
 }
 
 export default function TasteScreen() {
+  const { colors } = useTheme();
   const [artists, setArtists] = useState<Artist[]>([]);
   const [genres, setGenres] = useState<string[]>([]);
   const [artistInput, setArtistInput] = useState('');
@@ -154,55 +172,74 @@ export default function TasteScreen() {
     }
   };
 
-  if (loading) return <ActivityIndicator style={styles.center} size="large" color="#6200EE" />;
+  if (loading) {
+    return (
+      <View style={[styles.container, { flex: 1, backgroundColor: colors.background }]}>
+        <Skeleton width="45%" height={20} style={{ marginBottom: spacing.md }} />
+        <Skeleton height={44} radius={radii.sm} style={{ marginBottom: spacing.lg }} />
+        <View style={styles.chipRow}>
+          <Skeleton width={90} height={30} radius={radii.pill} />
+          <Skeleton width={70} height={30} radius={radii.pill} />
+          <Skeleton width={110} height={30} radius={radii.pill} />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <>
       <FlatList
+        style={{ backgroundColor: colors.background }}
         ListHeaderComponent={
           <View>
-            <Text style={styles.sectionTitle}>Favorite Artists</Text>
+            <Text style={[styles.sectionTitle, { color: colors.label }]}>Favorite Artists</Text>
             <View style={styles.row}>
               <TextInput
-                style={styles.input}
+                style={[styles.input, { borderColor: colors.separator, color: colors.label, backgroundColor: colors.surface }]}
                 placeholder="Artist name"
+                placeholderTextColor={colors.labelTertiary}
                 value={artistInput}
                 onChangeText={setArtistInput}
                 onSubmitEditing={handleAddArtist}
                 returnKeyType="done"
               />
-              <TouchableOpacity style={styles.addBtn} onPress={handleAddArtist} disabled={addingArtist}>
-                <Text style={styles.addBtnText}>{addingArtist ? '...' : 'Add'}</Text>
-              </TouchableOpacity>
+              <Button title="Add" onPress={handleAddArtist} loading={addingArtist} />
             </View>
+            {artists.length === 0 && (
+              <Text style={[styles.emptyHint, { color: colors.labelTertiary }]}>
+                Add the artists you love — they’re the strongest signal for your feed.
+              </Text>
+            )}
           </View>
         }
         data={artists}
         keyExtractor={(a) => a.id}
         renderItem={({ item }) => (
-          <View style={styles.chip}>
-            <Text style={styles.chipText}>{item.name}</Text>
-            <TouchableOpacity onPress={() => handleRemoveArtist(item.id)}>
-              <Text style={styles.remove}>✕</Text>
-            </TouchableOpacity>
+          <View style={styles.chipWrap}>
+            <Chip label={item.name} onRemove={() => handleRemoveArtist(item.id)} />
           </View>
         )}
         ListFooterComponent={
           <View>
-            <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Favorite Genres</Text>
-            <TouchableOpacity style={styles.pickBtn} onPress={() => setPickerOpen(true)}>
-              <Text style={styles.pickBtnText}>+ Pick genres</Text>
+            <Text style={[styles.sectionTitle, { color: colors.label, marginTop: spacing.xl }]}>Favorite Genres</Text>
+            <TouchableOpacity
+              style={[styles.pickBtn, { borderColor: colors.accent }]}
+              onPress={() => setPickerOpen(true)}
+            >
+              <Icon name="add" size={16} color={colors.accent} />
+              <Text style={[styles.pickBtnText, { color: colors.accent }]}>Pick genres</Text>
             </TouchableOpacity>
-            <View style={styles.chipRow}>
-              {genres.map((g) => (
-                <View key={g} style={styles.chip}>
-                  <Text style={styles.chipText}>{g}</Text>
-                  <TouchableOpacity onPress={() => handleRemoveGenre(g)}>
-                    <Text style={styles.remove}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
+            {genres.length === 0 ? (
+              <Text style={[styles.emptyHint, { color: colors.labelTertiary }]}>
+                Pick a few genres to round out shows beyond your named artists.
+              </Text>
+            ) : (
+              <View style={styles.chipRow}>
+                {genres.map((g) => (
+                  <Chip key={g} label={g} onRemove={() => handleRemoveGenre(g)} />
+                ))}
+              </View>
+            )}
           </View>
         }
         contentContainerStyle={styles.container}
@@ -217,52 +254,42 @@ export default function TasteScreen() {
   );
 }
 
+// Layout/metrics only — colors come from the theme at render time.
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  container: { padding: 16 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
-  row: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  container: { padding: spacing.lg },
+  sectionTitle: { ...typeScale.title, fontSize: 18, marginBottom: spacing.md },
+  row: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   input: {
-    flex: 1, borderWidth: 1, borderColor: '#ddd',
-    borderRadius: 8, padding: 10, fontSize: 15,
+    flex: 1, borderWidth: 1, borderRadius: radii.sm,
+    padding: spacing.md, fontSize: 15,
   },
-  addBtn: {
-    backgroundColor: '#6200EE', borderRadius: 8,
-    paddingHorizontal: 16, justifyContent: 'center',
-  },
-  addBtnText: { color: '#fff', fontWeight: '600' },
+  chipWrap: { marginBottom: spacing.sm, alignSelf: 'flex-start' },
   pickBtn: {
-    borderWidth: 1, borderColor: '#6200EE', borderStyle: 'dashed',
-    borderRadius: 8, padding: 10, alignItems: 'center', marginBottom: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs,
+    borderWidth: 1, borderStyle: 'dashed', borderRadius: radii.sm,
+    padding: spacing.md, marginBottom: spacing.md,
   },
-  pickBtnText: { color: '#6200EE', fontWeight: '600' },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#f0e6ff', borderRadius: 20,
-    paddingVertical: 6, paddingHorizontal: 12, marginBottom: 8,
-  },
-  chipText: { fontSize: 14, color: '#6200EE' },
-  remove: { fontSize: 14, color: '#9c4dcc', fontWeight: '700' },
+  pickBtnText: { ...typeScale.headline },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  emptyHint: { ...typeScale.callout, marginBottom: spacing.xs },
 });
 
 const pickerStyles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 56, paddingHorizontal: 16 },
+  container: { flex: 1, paddingTop: 56, paddingHorizontal: spacing.lg },
   header: {
     flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 12,
+    alignItems: 'center', marginBottom: spacing.md,
   },
-  title: { fontSize: 20, fontWeight: '700' },
-  done: { fontSize: 16, color: '#6200EE', fontWeight: '600' },
+  title: { ...typeScale.title, fontSize: 20 },
+  done: { ...typeScale.headline },
   genreRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee',
-    backgroundColor: '#fff',
+    paddingVertical: spacing.md, borderBottomWidth: 1,
   },
   genreName: { flex: 1 },
-  genreText: { fontSize: 16, fontWeight: '600', color: '#222' },
-  expand: { fontSize: 16, color: '#6200EE', paddingHorizontal: 8 },
-  subgenreRow: { paddingVertical: 10, paddingLeft: 20 },
-  subgenreText: { fontSize: 15, color: '#444' },
-  pickedText: { color: '#00897B' },
+  pickedLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  genreText: { ...typeScale.headline, fontSize: 16 },
+  subgenreRow: { paddingVertical: spacing.sm + 2, paddingLeft: spacing.xl },
+  subgenreText: { ...typeScale.body },
 });

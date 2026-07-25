@@ -4,3 +4,4 @@ export { Button } from './Button';
 export { Card } from './Card';
 export { Chip } from './Chip';
 export { Avatar } from './Avatar';
+export { Skeleton, FeedCardSkeleton, RowCardSkeleton } from './Skeleton';
