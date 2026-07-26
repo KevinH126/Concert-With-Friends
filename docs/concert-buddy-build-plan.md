@@ -134,8 +134,8 @@ P1.5  Deploy the backend                     ✅ done (live on Render)
 P2    Social graph + interest-marking        ✅ done (verified on prod)
 P3    Matching  (+ ranked feed, event search, compose-sheet hand-off)   ✅ done (verified on prod)
 P3.5  UI pass  (lean-but-tasteful foundation)   ✅ done (device-verified 2026-07-25)
-P4    Notification pipeline                   ★ CENTERPIECE 1   ← next (grilled + locked 2026-07-25)
-P4.5  Travel-willingness / anywhere-sync      (own phase right after the pipeline)
+P4    Notification pipeline                   ★ CENTERPIECE 1   ✅ done + DEPLOYED (2026-07-25)
+P4.5  Travel-willingness / anywhere-sync      ← next (own phase right after the pipeline)
 P5    Push delivery  (+ onboard the real friend group)
 P6    Taste-set expansion (Spotify)
 P7    In-app chat                             ★ CENTERPIECE 2
@@ -425,6 +425,14 @@ the live feed already shows the cached show; a push there is redundant.
 - **"I built an idempotent, deduplicated notification pipeline with a transactional outbox and
   chose at-least-once delivery because a missed concert alert is worse than a duplicate" is the
   sentence that lands.**
+- **Honest status: ✅ DONE + DEPLOYED (2026-07-25).** Built strict-TDD in 8 vertical slices;
+  11 pipeline tests (the full behavioral matrix) green, 123-test suite green. Live on Render:
+  paid `cwf-worker` (`celery worker -B --concurrency=1`) + free `cwf-redis` (Key Value, pinned
+  `virginia` — a cross-region default first broke private DNS). Migration `f2a7c1904e8b` applied
+  to prod. **Verified end-to-end on prod:** a shared mark by one account enqueued a
+  `friend_mark_ping_task` that the worker consumed and delivered via `LogNotifier`
+  (`NOTIFY … kind=friend_mark …`, succeeded 0.25s). Real Expo push swaps in at P5; `LogNotifier`
+  is the delivery until then. Test accounts left on prod: `p4smoke_a/b_*` (@example.com).
 
 **Out of scope (explicit):** change-notifications ("show moved"), date-windowed full coverage,
 `notifications_sent` pruning, per-metro-local scheduling, the add-time new-relevance push.
